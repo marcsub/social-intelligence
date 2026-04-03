@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Chart, registerables } from "chart.js";
 Chart.register(...registerables);
 
-const API = "/api";
+const API_BASE = import.meta.env.PROD ? "/social/api" : "/api";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 function useAuth() {
@@ -24,7 +24,7 @@ function useAuth() {
 
 function useApi(token) {
   const call = useCallback(async (method, path, body) => {
-    const r = await fetch(`${API}${path}`, {
+    const r = await fetch(`${API_BASE}${path}`, {
       method,
       headers: {
         "Authorization": `Bearer ${token}`,
