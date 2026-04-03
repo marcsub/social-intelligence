@@ -1,0 +1,29 @@
+﻿# Entorno virtual
+venv/
+
+# Variables de entorno
+.env
+
+# Imágenes de Stories
+stories_images/
+
+# Base de datos local
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
