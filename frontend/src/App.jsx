@@ -8,10 +8,11 @@ const API = "/api";
 function useAuth() {
   const [token, setToken] = useState(() => localStorage.getItem("si_token"));
   const login = async (username, password) => {
-    const fd = new FormData();
-    fd.append("username", username);
-    fd.append("password", password);
-    const r = await fetch("/auth/login", { method: "POST", body: fd });
+    const r = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+    });
     if (!r.ok) throw new Error("Credenciales incorrectas");
     const { access_token } = await r.json();
     localStorage.setItem("si_token", access_token);
