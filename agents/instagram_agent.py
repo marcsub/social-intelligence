@@ -30,6 +30,23 @@ settings = get_settings()
 
 GRAPH = "https://graph.facebook.com/v21.0"
 
+
+def _parse_ts(s: str) -> datetime:
+    """
+    Parsea ISO 8601 devuelto por la API de Instagram/Meta.
+    Meta devuelve '+0000' (sin dos puntos) que fromisoformat rechaza en Python < 3.11.
+    Normaliza a '+00:00' antes de parsear.
+    """
+    if not s:
+        return datetime.now(timezone.utc)
+    s = s.replace("Z", "+00:00")
+    if len(s) >= 5 and s[-5] in ('+', '-') and ':' not in s[-5:]:
+        s = s[:-2] + ':' + s[-2:]
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return datetime.now(timezone.utc)
+
 INSIGHTS_MAX_AGE_DAYS = 730  # Meta no proporciona insights para posts con > 24 meses
 
 # Métricas válidas en v21.0 para posts/carruseles/videos
@@ -206,11 +223,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
             if media_type not in TIPO_MAP:
                 continue  # ignorar STORIES (tienen su propio agente)
 
-            fecha_str = item.get("timestamp", "")
-            try:
-                fecha = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
-            except Exception:
-                fecha = datetime.now(timezone.utc)
+            fecha = _parse_ts(item.get("timestamp", ""))
 
             # Parar cuando llegamos a contenido anterior al checkpoint
             if checkpoint and fecha <= checkpoint:

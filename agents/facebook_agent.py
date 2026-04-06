@@ -26,6 +26,23 @@ settings = get_settings()
 
 GRAPH = "https://graph.facebook.com/v25.0"
 
+
+def _parse_ts(s: str) -> datetime:
+    """
+    Parsea ISO 8601 devuelto por la API de Facebook/Meta.
+    Meta devuelve '+0000' (sin dos puntos) que fromisoformat rechaza en Python < 3.11.
+    Normaliza a '+00:00' antes de parsear.
+    """
+    if not s:
+        return datetime.now(timezone.utc)
+    s = s.replace("Z", "+00:00")
+    if len(s) >= 5 and s[-5] in ('+', '-') and ':' not in s[-5:]:
+        s = s[:-2] + ':' + s[-2:]
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return datetime.now(timezone.utc)
+
 # Meta no proporciona insights para posts con más de 24 meses de antigüedad
 INSIGHTS_MAX_AGE_DAYS = 730
 
@@ -271,11 +288,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
 
         alcanzado_checkpoint = False
         for item in items:
-            fecha_str = item.get("created_time", "")
-            try:
-                fecha = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
-            except Exception:
-                fecha = datetime.now(timezone.utc)
+            fecha = _parse_ts(item.get("created_time", ""))
 
             if checkpoint and fecha <= checkpoint:
                 alcanzado_checkpoint = True
