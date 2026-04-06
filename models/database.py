@@ -241,6 +241,7 @@ class Publicacion(Base):
     estado_marca        = Column(Enum(EstadoMarcaEnum), nullable=True)  # estimated | to_review | ok
     ultima_actualizacion = Column(DateTime, nullable=True)
     captura_url         = Column(String(1000))                  # ruta local captura / link Drive
+    texto               = Column(Text, nullable=True)           # caption / description / body del post
     notas               = Column(Text)
     fecha_insercion     = Column(DateTime, default=func.now())
 

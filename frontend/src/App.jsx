@@ -585,6 +585,54 @@ const CANAL_DOT_LABELS = {
   threads: "Threads",
 };
 
+function TextTooltip({ texto }) {
+  const [show, setShow] = useState(false);
+  if (!texto) return null;
+  return (
+    <span
+      style={{ position: "relative", display: "inline-flex", alignItems: "center", flexShrink: 0 }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {/* Icono documento */}
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
+        style={{ color: "#bbb", cursor: "default", display: "block" }}>
+        <rect x="2.5" y="1.5" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+        <line x1="5" y1="5.5"  x2="11" y2="5.5"  stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="5" y1="8"    x2="11" y2="8"    stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="5" y1="10.5" x2="9"  y2="10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      </svg>
+      {show && (
+        <div style={{
+          position: "absolute",
+          bottom: "calc(100% + 5px)",
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 300,
+          background: "#fff",
+          border: "1px solid #e0e0e0",
+          borderRadius: 7,
+          padding: "8px 10px",
+          width: 280,
+          maxWidth: 280,
+          maxHeight: 180,
+          overflowY: "auto",
+          fontSize: 12,
+          color: "#555",
+          lineHeight: 1.55,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          boxShadow: "0 3px 10px rgba(0,0,0,0.13)",
+          pointerEvents: "none",
+          textAlign: "left",
+        }}>
+          {texto}
+        </div>
+      )}
+    </span>
+  );
+}
+
 function CanalCell({ canal, tipo }) {
   const key = tipo === "reel" ? "reel" : canal;
   const color = CANAL_DOT_COLORS[key] || "#999";
@@ -1049,13 +1097,14 @@ function PublicacionesPage({ slug, api }) {
                             </span>
                           );
                         })()}
-                        <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}
+                        <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0, flex:1 }}
                           title={item.titulo || item.url}>
                           {item.titulo
                             ? <span style={{ fontSize:13, color:"#1a1a2e" }}>{item.titulo}</span>
                             : <span style={{ fontSize:11, color:"#aaa" }}>{item.url}</span>
                           }
                         </div>
+                        <TextTooltip texto={item.texto} />
                       </div>
                     </td>
 

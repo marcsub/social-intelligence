@@ -208,6 +208,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
             tipo=TipoEnum.video,
             url=url,
             titulo=titulo,
+            texto=descripcion or None,
             fecha_publicacion=fecha,
             reach=stats.get("views", 0),
             likes=stats.get("likes", 0),

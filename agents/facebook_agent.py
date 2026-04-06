@@ -357,6 +357,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
                 tipo=TipoEnum.post,
                 url=permalink,
                 titulo=None,
+                texto=message or None,
                 fecha_publicacion=fecha,
                 reach=reach_val,
                 likes=insights.get("reactions", 0),

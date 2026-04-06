@@ -281,6 +281,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
                 tipo=_get_tipo(media_type, permalink),
                 url=permalink,
                 titulo=None,  # Instagram no tiene títulos
+                texto=caption or None,
                 fecha_publicacion=fecha,
                 reach=insights.get("reach", 0),
                 likes=likes,

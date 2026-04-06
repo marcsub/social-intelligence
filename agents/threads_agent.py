@@ -221,6 +221,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
                 tipo=tipo,
                 url=permalink,
                 titulo=None,
+                texto=text or None,
                 fecha_publicacion=fecha,
                 reach=insights["reach"],
                 likes=insights["likes"],

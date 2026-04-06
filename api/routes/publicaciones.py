@@ -84,6 +84,7 @@ def _pub_item(p: Publicacion, marcas_map: dict, agencias_map: dict, pub_marcas_m
         "confianza_marca": p.confianza_marca,
         "estado_marca": p.estado_marca.value if p.estado_marca else None,
         "captura_url": p.captura_url,
+        "texto": p.texto or None,
         "ultima_actualizacion": p.ultima_actualizacion.isoformat() if p.ultima_actualizacion else None,
         "intentos_fallidos": _parse_intentos(p.notas),
         "es_final": snap["es_final"] if snap else False,
