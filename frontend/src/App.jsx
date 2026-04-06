@@ -585,48 +585,74 @@ const CANAL_DOT_LABELS = {
   threads: "Threads",
 };
 
-function TextTooltip({ texto }) {
-  const [show, setShow] = useState(false);
+function TextTooltip({ texto, isOpen, onOpen, onClose }) {
+  const popoverRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [isOpen, onClose]);
+
   if (!texto) return null;
   return (
     <span
+      ref={popoverRef}
       style={{ position: "relative", display: "inline-flex", alignItems: "center", flexShrink: 0 }}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
     >
-      {/* Icono documento */}
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
-        style={{ color: "#bbb", cursor: "default", display: "block" }}>
+      {/* Icono documento — click para abrir */}
+      <svg
+        width="16" height="16" viewBox="0 0 16 16" fill="none"
+        onClick={(e) => { e.stopPropagation(); isOpen ? onClose() : onOpen(); }}
+        style={{ color: "#999", cursor: "pointer", display: "block" }}
+      >
         <rect x="2.5" y="1.5" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.4" fill="none"/>
         <line x1="5" y1="5.5"  x2="11" y2="5.5"  stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
         <line x1="5" y1="8"    x2="11" y2="8"    stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
         <line x1="5" y1="10.5" x2="9"  y2="10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
       </svg>
-      {show && (
+      {isOpen && (
         <div style={{
           position: "absolute",
-          bottom: "calc(100% + 5px)",
+          bottom: "calc(100% + 6px)",
           left: "50%",
           transform: "translateX(-50%)",
           zIndex: 300,
           background: "#fff",
           border: "1px solid #e0e0e0",
-          borderRadius: 7,
-          padding: "8px 10px",
-          width: 280,
-          maxWidth: 280,
-          maxHeight: 180,
-          overflowY: "auto",
-          fontSize: 12,
-          color: "#555",
-          lineHeight: 1.55,
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          boxShadow: "0 3px 10px rgba(0,0,0,0.13)",
-          pointerEvents: "none",
-          textAlign: "left",
+          borderRadius: 8,
+          width: 450,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
         }}>
-          {texto}
+          {/* Header con botón X */}
+          <div style={{
+            display: "flex", justifyContent: "flex-end", alignItems: "center",
+            padding: "6px 10px 4px", borderBottom: "1px solid #f0f0f0",
+          }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose(); }}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14,
+                color: "#aaa", lineHeight: 1, padding: "0 2px" }}
+            >✕</button>
+          </div>
+          {/* Cuerpo con scroll */}
+          <div style={{
+            padding: "12px 16px",
+            maxHeight: 260,
+            overflowY: "auto",
+            fontSize: 13,
+            color: "#444",
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}>
+            {texto}
+          </div>
         </div>
       )}
     </span>
@@ -792,6 +818,7 @@ function PublicacionesPage({ slug, api }) {
   const [rowSaving, setRowSaving] = useState({});
   const [storyModal, setStoryModal] = useState(null);
   const [hoveredRow, setHoveredRow] = useState(null);
+  const [textoAbierto, setTextoAbierto] = useState(null);
 
   useEffect(() => {
     api("GET", `/medios/${slug}/marcas`).then(setMarcas).catch(() => {});
@@ -1104,7 +1131,12 @@ function PublicacionesPage({ slug, api }) {
                             : <span style={{ fontSize:11, color:"#aaa" }}>{item.url}</span>
                           }
                         </div>
-                        <TextTooltip texto={item.texto} />
+                        <TextTooltip
+                          texto={item.texto}
+                          isOpen={textoAbierto === item.id}
+                          onOpen={() => setTextoAbierto(item.id)}
+                          onClose={() => setTextoAbierto(null)}
+                        />
                       </div>
                     </td>
 
