@@ -881,12 +881,15 @@ function PublicacionesPage({ slug, api }) {
   const inicio = data ? (page - 1) * PER_PAGE + 1 : 0;
   const fin    = data ? Math.min(page * PER_PAGE, data.total) : 0;
 
-  const storyImgUrl = (captura) => {
-    const path = captura.replace(/\\/g, "/");
-    const url = path.startsWith("stories_images/")
-      ? `http://localhost:8000/${path}`
-      : `http://localhost:8000/stories_images/${path}`;
-    return url;
+  const storyImgUrl = (captura_url) => {
+    if (!captura_url || captura_url === "expired") return null;
+    const path = captura_url.replace(/\\/g, "/");
+    const clean = path.startsWith("stories_images/") ? path.slice("stories_images/".length) : path;
+    if (import.meta.env.PROD) {
+      return `/social/stories_images/${clean}`;
+    } else {
+      return `http://localhost:8000/stories_images/${clean}`;
+    }
   };
 
   return (
