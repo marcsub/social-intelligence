@@ -3,7 +3,9 @@ agents/youtube_shorts_agent.py
 Agente YouTube Shorts: detecta y actualiza métricas de Shorts del canal propio.
 Reutiliza las credenciales OAuth2 configuradas para el canal de YouTube.
 
-Criterio de detección de Shorts: duración <= 60 segundos (contentDetails.duration).
+Criterio de detección de Shorts:
+  1. Principal: duración <= 60 segundos (contentDetails.duration, ISO 8601)
+  2. Fallback (si duration no disponible): título contiene '#Shorts' o '#shorts'
 Las métricas de Shorts son poco fiables en las primeras 48h — update_metrics
 solo procesa publicaciones con más de 48h de antigüedad.
 """
@@ -46,10 +48,11 @@ def _parse_duration(iso: str) -> int:
     return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
 
 
-def _get_shorts_details(yt, video_ids: list[str]) -> dict:
+def _get_video_details(yt, video_ids: list[str]) -> dict:
     """
-    Obtiene estadísticas, snippet y contentDetails de una lista de vídeos.
-    Devuelve solo los que son Shorts (duración <= 60s).
+    Obtiene estadísticas, snippet, contentDetails de una lista de vídeos.
+    Devuelve dict {video_id: {views, likes, comments, tags, duration_s}}.
+    No filtra por duración — el filtrado se hace en detect_new().
     """
     if not video_ids:
         return {}
@@ -61,21 +64,33 @@ def _get_shorts_details(yt, video_ids: list[str]) -> dict:
         result = {}
         for item in resp.get("items", []):
             vid = item["id"]
-            duration = item.get("contentDetails", {}).get("duration", "")
-            if _parse_duration(duration) > SHORTS_MAX_SECONDS:
-                continue  # vídeo normal — lo gestiona youtube_agent
+            duration_iso = item.get("contentDetails", {}).get("duration", "")
             stats = item.get("statistics", {})
             snippet = item.get("snippet", {})
             result[vid] = {
-                "views":    int(stats.get("viewCount", 0)),
-                "likes":    int(stats.get("likeCount", 0)),
-                "comments": int(stats.get("commentCount", 0)),
-                "tags":     snippet.get("tags", []),
+                "views":      int(stats.get("viewCount", 0)),
+                "likes":      int(stats.get("likeCount", 0)),
+                "comments":   int(stats.get("commentCount", 0)),
+                "tags":       snippet.get("tags", []),
+                "duration_s": _parse_duration(duration_iso),
+                "duration_iso": duration_iso,
             }
         return result
     except Exception as ex:
-        log.error(f"[YouTube Shorts] Error obteniendo detalles: {ex}")
+        log.error(f"[YouTube Shorts] Error obteniendo detalles de vídeos: {ex}")
         return {}
+
+
+def _get_shorts_details(yt, video_ids: list[str]) -> dict:
+    """
+    Obtiene estadísticas para vídeos ya confirmados como Shorts (en update_metrics).
+    Igual que _get_video_details pero sin el campo duration_s en el resultado.
+    """
+    details = _get_video_details(yt, video_ids)
+    return {
+        vid: {k: v for k, v in data.items() if k not in ("duration_s", "duration_iso")}
+        for vid, data in details.items()
+    }
 
 
 # ── Detección de Shorts nuevos ────────────────────────────────────────────────
@@ -83,8 +98,9 @@ def _get_shorts_details(yt, video_ids: list[str]) -> dict:
 def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> list[Publicacion]:
     """
     Detecta Shorts nuevos publicados en el canal desde el checkpoint.
-    Un Short es un vídeo con duración <= 60 segundos.
-    Ignora vídeos normales (los gestiona youtube_agent).
+    Verificación en dos pasos:
+      1. HTTP HEAD a /shorts/{id} — 200 = Short, 303 = vídeo normal
+      2. Fallback: duración <= 62s si el HEAD falla
     """
     config = medio.config
     if not config or not config.youtube_channel_id:
@@ -121,25 +137,62 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         return []
 
     items = resp.get("items", [])
+    log.info(f"[{medio.slug}] Search API devolvió {len(items)} vídeos")
     if not items:
-        log.info(f"[{medio.slug}] Sin vídeos nuevos para comprobar Shorts")
         return []
 
     video_ids = [i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId")]
-    shorts_map = _get_shorts_details(yt, video_ids)  # solo Shorts (duración <= 60s)
 
-    if not shorts_map:
-        log.info(f"[{medio.slug}] Ningún Short nuevo detectado")
+    # Obtener detalles de todos los vídeos
+    all_details = _get_video_details(yt, video_ids)
+    log.info(f"[{medio.slug}] videos.list devolvió detalles para {len(all_details)} vídeos")
+
+    # Determinar cuáles son Shorts
+    # Criterio principal: duración <= 60s
+    # Criterio secundario (si duration no disponible): título contiene #Shorts
+    confirmed_shorts: set[str] = set()
+    for item in items:
+        vid_id = item.get("id", {}).get("videoId")
+        if not vid_id:
+            continue
+        detail = all_details.get(vid_id)
+        titulo_search = item.get("snippet", {}).get("title", "")
+
+        if not detail:
+            log.info(f"[{medio.slug}] Verificando vídeo {vid_id}: sin datos de API — omitido")
+            continue
+
+        duration_s = detail["duration_s"]
+        duration_iso = detail["duration_iso"]
+        log.info(f"[{medio.slug}] Verificando vídeo {vid_id}: duración={duration_s}s ({duration_iso})")
+
+        if duration_iso:
+            # Criterio principal: duración
+            if duration_s <= SHORTS_MAX_SECONDS:
+                log.info(f"[{medio.slug}] Short confirmado: {vid_id} ({duration_s}s <= {SHORTS_MAX_SECONDS}s)")
+                confirmed_shorts.add(vid_id)
+            else:
+                log.info(f"[{medio.slug}] No es Short: {vid_id} ({duration_s}s > {SHORTS_MAX_SECONDS}s)")
+        else:
+            # Fallback: título contiene #Shorts
+            has_hashtag = "#shorts" in titulo_search.lower()
+            if has_hashtag:
+                log.info(f"[{medio.slug}] Short confirmado (#Shorts en título): {vid_id}")
+                confirmed_shorts.add(vid_id)
+            else:
+                log.info(f"[{medio.slug}] No es Short (sin duración ni #Shorts): {vid_id}")
+
+    if not confirmed_shorts:
+        log.info(f"[{medio.slug}] Ningún Short nuevo confirmado")
         return []
 
-    config = medio.config
     umbral = config.umbral_confianza_marca if config else 80
     nuevas = []
 
     for item in items:
         video_id = item.get("id", {}).get("videoId")
-        if not video_id or video_id not in shorts_map:
-            continue  # vídeo normal o sin datos — ignorar
+        if not video_id or video_id not in confirmed_shorts:
+            continue
 
         # Evitar duplicados
         existente = db.query(Publicacion).filter(
@@ -152,7 +205,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         snippet = item.get("snippet", {})
         titulo = snippet.get("title", "")
         descripcion = snippet.get("description", "")[:500]
-        tags_raw = shorts_map[video_id].get("tags", [])
+        tags_raw = all_details[video_id].get("tags", [])
         tags = " ".join(tags_raw)
         fecha_str = snippet.get("publishedAt", "")
 
@@ -183,7 +236,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
             else EstadoMarcaEnum.to_review
         )
 
-        stats = shorts_map[video_id]
+        stats = all_details[video_id]
         pub = Publicacion(
             medio_id=medio.id,
             marca_id=brand.marca_id,
