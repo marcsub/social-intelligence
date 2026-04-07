@@ -20,6 +20,7 @@ import sys
 import os
 import logging
 import argparse
+import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -103,14 +104,18 @@ def main():
 
         log.info(f"Uploads playlist: {uploads_playlist}")
 
-        # ── Paso 2: paginar playlistItems hasta FECHA_INICIO ──────────────────
-        all_video_ids: list[str] = []   # todos los video_id dentro de fecha
+        # ── Paso 2: paginar playlistItems completa (orden ascendente) ───────────
+        # playlistItems devuelve vídeos en orden ASCENDENTE (más antiguos primero),
+        # por lo que NO se puede parar al ver un vídeo anterior a FECHA_INICIO —
+        # hay que paginar hasta el final y filtrar por fecha al procesar.
+        all_video_ids: list[str] = []   # video_ids dentro de FECHA_INICIO
         total_escaneados = 0
         page_token = None
         page_num = 0
-        stop_pagination = False
+        total_results: int = 0          # estimado de pageInfo.totalResults
+        t_inicio = time.monotonic()
 
-        while not stop_pagination:
+        while True:
             page_num += 1
             req_params: dict = {
                 "part":       "snippet",
@@ -126,9 +131,17 @@ def main():
                 log.error(f"Error en playlistItems().list (página {page_num}): {ex}")
                 break
 
+            # Guardar totalResults en la primera página para estimación
+            if page_num == 1:
+                total_results = pl_resp.get("pageInfo", {}).get("totalResults", 0)
+                total_pages_est = (total_results + BATCH_SIZE - 1) // BATCH_SIZE
+                log.info(
+                    f"Canal tiene ~{total_results} vídeos en total "
+                    f"(~{total_pages_est} páginas de {BATCH_SIZE})"
+                )
+
             pl_items = pl_resp.get("items", [])
             dentro_fecha = 0
-            shorts_pagina = 0  # se calcula tras videos.list; aquí solo contamos para el log
 
             for pl_item in pl_items:
                 total_escaneados += 1
@@ -139,34 +152,42 @@ def main():
                 if not video_id:
                     continue
 
-                # Parsear fecha de publicación
                 try:
                     pub_dt = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
                 except Exception:
                     pub_dt = None
 
-                if pub_dt and pub_dt < FECHA_INICIO:
-                    log.info(
-                        f"  video_id={video_id} publishedAt={published_str[:10]} "
-                        f"< {FECHA_INICIO.date()} — parando paginación"
-                    )
-                    stop_pagination = True
-                    break
-
-                all_video_ids.append(video_id)
-                dentro_fecha += 1
+                # Filtrar por fecha DESPUÉS de obtener (no parar al ver uno antiguo)
+                if pub_dt and pub_dt >= FECHA_INICIO:
+                    all_video_ids.append(video_id)
+                    dentro_fecha += 1
 
             log.info(
                 f"Página {page_num}: {len(pl_items)} vídeos, "
                 f"{dentro_fecha} dentro de fecha "
-                f"(acumulado: {len(all_video_ids)})"
+                f"(acumulado en fecha: {len(all_video_ids)} / escaneados: {total_escaneados})"
             )
+
+            # Progreso y estimación de tiempo cada 5 páginas
+            if page_num % 5 == 0 and total_results > 0:
+                elapsed = time.monotonic() - t_inicio
+                pct = total_escaneados / total_results
+                eta_s = (elapsed / pct - elapsed) if pct > 0 else 0
+                log.info(
+                    f"--- Progreso: {total_escaneados}/{total_results} vídeos "
+                    f"({pct*100:.1f}%) | {len(all_video_ids)} dentro de fecha | "
+                    f"Tiempo transcurrido: {elapsed:.0f}s | ETA: ~{eta_s:.0f}s ---"
+                )
 
             page_token = pl_resp.get("nextPageToken")
             if not page_token:
-                break
+                break   # fin real de la playlist
 
-        log.info(f"Paginación completa: {total_escaneados} escaneados, {len(all_video_ids)} dentro de {FECHA_INICIO.date()}")
+        elapsed_total = time.monotonic() - t_inicio
+        log.info(
+            f"Paginación completa en {elapsed_total:.1f}s: "
+            f"{total_escaneados} escaneados, {len(all_video_ids)} desde {FECHA_INICIO.date()}"
+        )
 
         # ── Paso 3: obtener detalles en lotes de 50 y filtrar Shorts ─────────
         config = medio.config
