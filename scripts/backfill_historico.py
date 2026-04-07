@@ -9,6 +9,7 @@ Uso:
     python scripts/backfill_historico.py --slug roadrunningreview --canal instagram
     python scripts/backfill_historico.py --slug roadrunningreview --canal facebook
     python scripts/backfill_historico.py --slug roadrunningreview --canal threads
+    python scripts/backfill_historico.py --slug roadrunningreview --canal youtube_short
     python scripts/backfill_historico.py --slug roadrunningreview --canal all
     python scripts/backfill_historico.py --slug roadrunningreview --anio 2026 --dry-run
 
@@ -39,7 +40,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("backfill")
 
-CANALES_DISPONIBLES = ["all", "web", "youtube", "instagram", "facebook", "threads"]
+CANALES_DISPONIBLES = ["all", "web", "youtube", "youtube_short", "instagram", "facebook", "threads"]
 
 
 def main():
@@ -70,7 +71,7 @@ def main():
             log.info("Dry-run: sin cambios"); return
 
         canales = (
-            ["web", "youtube", "instagram", "facebook", "threads"]
+            ["web", "youtube", "youtube_short", "instagram", "facebook", "threads"]
             if args.canal == "all"
             else [args.canal]
         )
@@ -90,6 +91,14 @@ def main():
             log.info("YouTube Analytics permite rangos históricos → calculando semana a semana...")
             n = youtube_agent.update_weekly_youtube(db, medio)
             log.info(f"youtube completado: {n} publicaciones procesadas")
+
+        # ── YouTube Shorts Analytics — histórico real semana a semana ────────
+        if "youtube_short" in canales:
+            from agents import youtube_shorts_agent
+            log.info("--- Iniciando backfill youtube_short (Analytics API histórico) ---")
+            log.info("YouTube Analytics permite rangos históricos → calculando semana a semana...")
+            n = youtube_shorts_agent.snapshot_weekly(db, medio)
+            log.info(f"youtube_short completado: {n} publicaciones procesadas")
 
         # ── RRSS — solo snapshot actual ───────────────────────────────────────
         for canal in ["instagram", "facebook", "threads"]:
