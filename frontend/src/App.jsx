@@ -49,6 +49,7 @@ const CANAL_COLORS = {
   instagram_story: "#C13584",
   facebook: "#185FA5",
   youtube: "#E24B4A",
+  youtube_short: "#E24B4A",
   x: "#1DA1F2",
   tiktok: "#010101",
   reel: "#9B59B6",
@@ -60,6 +61,7 @@ const CANAL_LABELS = {
   instagram_story: "Stories",
   facebook: "Facebook",
   youtube: "YouTube",
+  youtube_short: "Shorts",
   x: "X / Twitter",
   tiktok: "TikTok",
   reel: "Reels",
@@ -533,6 +535,7 @@ const CANALES_OPTS = [
   ["reel","Reels"],
   ["facebook","Facebook"],
   ["youtube","YouTube"],
+  ["youtube_short","Shorts"],
   ["threads","Threads"],
 ];
 const ESTADOS_OPTS = [
@@ -572,6 +575,7 @@ const CANAL_DOT_COLORS = {
   instagram_story: "#BA7517",
   facebook: "#0866FF",
   youtube: "#E24B4A",
+  youtube_short: "#E24B4A",
   reel: "#9B59B6",
   threads: "#000000",
 };
@@ -581,6 +585,7 @@ const CANAL_DOT_LABELS = {
   instagram_story: "Stories",
   facebook: "Facebook",
   youtube: "YouTube",
+  youtube_short: "Short",
   reel: "Reel",
   threads: "Threads",
 };

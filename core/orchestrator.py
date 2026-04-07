@@ -14,7 +14,7 @@ from models.database import (
     Medio, Publicacion, LogEjecucion,
     CanalEnum, EstadoMetricasEnum
 )
-from agents import web_agent, youtube_agent, instagram_agent, facebook_agent, threads_agent
+from agents import web_agent, youtube_agent, youtube_shorts_agent, instagram_agent, facebook_agent, threads_agent
 from agents import instagram_stories_agent
 from core.notifier import notify_daily
 from core.settings import get_settings
@@ -86,14 +86,16 @@ def _log_end(db: Session, entry: LogEjecucion, nuevas=0, actualizadas=0, revisio
 # ── Registro de agentes ───────────────────────────────────────────────────────
 
 AGENTS = {
-    "web":       web_agent,
-    "youtube":   youtube_agent,
-    "instagram": instagram_agent,
-    "facebook":  facebook_agent,
-    "threads":   threads_agent,
+    "web":            web_agent,
+    "youtube":        youtube_agent,
+    "youtube_shorts": youtube_shorts_agent,
+    "instagram":      instagram_agent,
+    "facebook":       facebook_agent,
+    "threads":        threads_agent,
 }
 
-# Canal asociado a cada agente (para query de métricas pendientes)
+# Canal asociado a cada agente (para query de métricas pendientes en run_agent).
+# youtube_shorts NO está aquí: sus métricas se actualizan en el job de 48h propio.
 AGENT_CANAL: dict[str, CanalEnum] = {
     "web":       CanalEnum.web,
     "youtube":   CanalEnum.youtube,
@@ -335,13 +337,26 @@ def _register_medio_jobs(scheduler, SessionLocal, medio: Medio):
     )
     log.info(f"[{slug}] Jobs stories: horario (cada :00) + captura final (:50-:59)")
 
+    # Job actualización Shorts cada 48h (datos fiables solo a partir de 48h)
+    scheduler.add_job(
+        func=_job_shorts_update,
+        trigger="interval",
+        hours=48,
+        args=[SessionLocal, medio.id],
+        id=f"{slug}_youtube_shorts_update",
+        replace_existing=True,
+        name=f"{slug} — YouTube Shorts actualización 48h",
+    )
+    log.info(f"[{slug}] Job Shorts update registrado (intervalo 48h)")
+
     # Jobs semanales — cada lunes, escalonados para no saturar las APIs
     _WEEKLY_FUNCS = [
-        ("web_ga4",   0,  0,  "GA4 histórico",      _job_weekly_web_ga4),
-        ("youtube",   0,  30, "YouTube Analytics",  _job_weekly_youtube),
-        ("instagram", 1,  0,  "Instagram snapshot", _job_weekly_instagram),
-        ("facebook",  1,  30, "Facebook snapshot",  _job_weekly_facebook),
-        ("threads",   2,  0,  "Threads snapshot",   _job_weekly_threads),
+        ("web_ga4",        0,  0,  "GA4 histórico",           _job_weekly_web_ga4),
+        ("youtube",        0,  30, "YouTube Analytics",       _job_weekly_youtube),
+        ("youtube_shorts", 0,  45, "YouTube Shorts Analytics",_job_weekly_youtube_shorts),
+        ("instagram",      1,  0,  "Instagram snapshot",      _job_weekly_instagram),
+        ("facebook",       1,  30, "Facebook snapshot",       _job_weekly_facebook),
+        ("threads",        2,  0,  "Threads snapshot",        _job_weekly_threads),
     ]
     for job_name, hour, minute, desc, func in _WEEKLY_FUNCS:
         scheduler.add_job(
@@ -441,11 +456,56 @@ def _job_weekly_web_ga4(SessionLocal, medio_id: int):
             _run_weekly_agent(db, medio, "web_ga4", web_agent.update_weekly_ga4)
 
 
+def _job_shorts_update(SessionLocal, medio_id: int):
+    """Job de actualización de Shorts cada 48h — solo procesa los shorts con > 48h de antigüedad."""
+    with SessionLocal() as db:
+        medio = db.get(Medio, medio_id)
+        if not medio or not medio.activo:
+            return
+        log_entry = _log_start(db, medio.id, "youtube_shorts", "shorts_update")
+        errores = []
+        actualizadas = 0
+        try:
+            from datetime import timedelta
+            umbral_48h = datetime.now(timezone.utc) - timedelta(hours=48)
+            pubs = (
+                db.query(Publicacion)
+                .filter(
+                    Publicacion.medio_id == medio.id,
+                    Publicacion.canal == CanalEnum.youtube_short,
+                    Publicacion.fecha_publicacion <= umbral_48h,
+                    Publicacion.estado_metricas.in_([
+                        EstadoMetricasEnum.pendiente,
+                        EstadoMetricasEnum.actualizado,
+                    ]),
+                )
+                .order_by(
+                    Publicacion.ultima_actualizacion.is_(None).desc(),
+                    Publicacion.ultima_actualizacion.asc(),
+                )
+                .limit(50)
+                .all()
+            )
+            if pubs:
+                actualizadas = youtube_shorts_agent.update_metrics(db, medio, pubs)
+        except Exception as ex:
+            log.error(f"[{medio.slug}] Error en Shorts update 48h: {ex}")
+            errores.append({"fase": "update_metrics", "error": str(ex)})
+        _log_end(db, log_entry, actualizadas=actualizadas, errores=errores if errores else None)
+
+
 def _job_weekly_youtube(SessionLocal, medio_id: int):
     with SessionLocal() as db:
         medio = db.get(Medio, medio_id)
         if medio and medio.activo:
             _run_weekly_agent(db, medio, "youtube", youtube_agent.update_weekly_youtube)
+
+
+def _job_weekly_youtube_shorts(SessionLocal, medio_id: int):
+    with SessionLocal() as db:
+        medio = db.get(Medio, medio_id)
+        if medio and medio.activo:
+            _run_weekly_agent(db, medio, "youtube_shorts", youtube_shorts_agent.snapshot_weekly)
 
 
 def _job_weekly_instagram(SessionLocal, medio_id: int):
@@ -504,11 +564,12 @@ def run_semanal(db: Session, medio: Medio) -> dict:
     log.info(f"[{medio.slug}] === Snapshot semanal {semana_actual} iniciado ===")
 
     steps = [
-        ("web_ga4",   lambda d, m: web_agent.update_weekly_ga4(d, m)),
-        ("youtube",   lambda d, m: youtube_agent.update_weekly_youtube(d, m)),
-        ("instagram", lambda d, m: instagram_agent.snapshot_weekly(d, m)),
-        ("facebook",  lambda d, m: facebook_agent.snapshot_weekly(d, m)),
-        ("threads",   lambda d, m: threads_agent.snapshot_weekly(d, m)),
+        ("web_ga4",        lambda d, m: web_agent.update_weekly_ga4(d, m)),
+        ("youtube",        lambda d, m: youtube_agent.update_weekly_youtube(d, m)),
+        ("youtube_shorts", lambda d, m: youtube_shorts_agent.snapshot_weekly(d, m)),
+        ("instagram",      lambda d, m: instagram_agent.snapshot_weekly(d, m)),
+        ("facebook",       lambda d, m: facebook_agent.snapshot_weekly(d, m)),
+        ("threads",        lambda d, m: threads_agent.snapshot_weekly(d, m)),
     ]
 
     resumen: dict = {}

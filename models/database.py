@@ -21,14 +21,16 @@ class Base(DeclarativeBase):
 # ── Enums ────────────────────────────────────────────────────────────────────
 
 class CanalEnum(str, enum.Enum):
-    web           = "web"
+    web             = "web"
     instagram_post  = "instagram_post"
     instagram_story = "instagram_story"
-    facebook      = "facebook"
-    x             = "x"
-    tiktok        = "tiktok"
-    youtube       = "youtube"
-    threads       = "threads"
+    facebook        = "facebook"
+    x               = "x"
+    tiktok          = "tiktok"
+    youtube         = "youtube"
+    youtube_short   = "youtube_short"
+    threads         = "threads"
+    reel            = "reel"
 
 class TipoEnum(str, enum.Enum):
     articulo = "articulo"
@@ -37,6 +39,7 @@ class TipoEnum(str, enum.Enum):
     reel     = "reel"
     video    = "video"
     tweet    = "tweet"
+    short    = "short"
 
 class EstadoMetricasEnum(str, enum.Enum):
     pendiente   = "pendiente"
