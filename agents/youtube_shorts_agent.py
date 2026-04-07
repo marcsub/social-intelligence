@@ -123,6 +123,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
     else:
         published_after = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    log.info(f"[{medio.slug}] Search API: iniciando búsqueda de vídeos (publishedAfter={published_after})...")
     try:
         resp = yt.search().list(
             part="id,snippet",
@@ -137,7 +138,9 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         return []
 
     items = resp.get("items", [])
-    log.info(f"[{medio.slug}] Search API devolvió {len(items)} vídeos")
+    log.info(f"[{medio.slug}] Search API: {len(items)} vídeos en respuesta raw")
+    for item in items:
+        log.info(f"[{medio.slug}]   video_id={item['id']['videoId']} title={item['snippet']['title'][:50]}")
     if not items:
         return []
 
@@ -145,7 +148,9 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
 
     # Obtener detalles de todos los vídeos
     all_details = _get_video_details(yt, video_ids)
-    log.info(f"[{medio.slug}] videos.list devolvió detalles para {len(all_details)} vídeos")
+    log.info(f"[{medio.slug}] videos.list: {len(all_details)} detalles obtenidos")
+    for vid_id, details in all_details.items():
+        log.info(f"[{medio.slug}]   {vid_id}: duration_s={details.get('duration_s')} duration_iso={details.get('duration_iso')}")
 
     # Determinar cuáles son Shorts
     # Criterio principal: duración <= 60s
