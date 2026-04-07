@@ -98,9 +98,8 @@ def _get_shorts_details(yt, video_ids: list[str]) -> dict:
 def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> list[Publicacion]:
     """
     Detecta Shorts nuevos publicados en el canal desde el checkpoint.
-    Verificación en dos pasos:
-      1. HTTP HEAD a /shorts/{id} — 200 = Short, 303 = vídeo normal
-      2. Fallback: duración <= 62s si el HEAD falla
+    Si checkpoint=None, escanea el canal completo con paginación (sin límite de fecha).
+    Si checkpoint es una fecha, busca solo desde esa fecha (una sola página, uso diario).
     """
     config = medio.config
     if not config or not config.youtube_channel_id:
@@ -117,30 +116,52 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         log.error(f"[{medio.slug}] Error construyendo cliente YouTube: {ex}")
         return []
 
+    full_scan = checkpoint is None
+    search_params: dict = {
+        "part":      "id,snippet",
+        "channelId": config.youtube_channel_id,
+        "type":      "video",
+        "order":     "date",
+        "maxResults": 50,
+    }
+
     if checkpoint:
         cp = checkpoint if checkpoint.tzinfo else checkpoint.replace(tzinfo=timezone.utc)
         published_after = cp.strftime("%Y-%m-%dT%H:%M:%SZ")
+        search_params["publishedAfter"] = published_after
+        log.info(f"[{medio.slug}] Search API: búsqueda incremental desde {published_after}")
     else:
-        published_after = (datetime.now(timezone.utc) - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        log.info(f"[{medio.slug}] Search API: escaneo completo del canal (paginación sin límite de fecha)")
 
-    log.info(f"[{medio.slug}] Search API: iniciando búsqueda de vídeos (publishedAfter={published_after})...")
-    try:
-        resp = yt.search().list(
-            part="id,snippet",
-            channelId=config.youtube_channel_id,
-            type="video",
-            order="date",
-            publishedAfter=published_after,
-            maxResults=50,
-        ).execute()
-    except Exception as ex:
-        log.error(f"[{medio.slug}] Error en YouTube Shorts search: {ex}")
-        return []
+    # Recoger todos los items, paginando si es escaneo completo
+    items: list = []
+    page_token: Optional[str] = None
+    page_num = 0
+    while True:
+        page_num += 1
+        if page_token:
+            search_params["pageToken"] = page_token
+        log.info(f"[{medio.slug}] Search API: solicitando página {page_num}...")
+        try:
+            resp = yt.search().list(**search_params).execute()
+        except Exception as ex:
+            log.error(f"[{medio.slug}] Error en YouTube Shorts search (página {page_num}): {ex}")
+            break
 
-    items = resp.get("items", [])
-    log.info(f"[{medio.slug}] Search API: {len(items)} vídeos en respuesta raw")
-    for item in items:
-        log.info(f"[{medio.slug}]   video_id={item['id']['videoId']} title={item['snippet']['title'][:50]}")
+        page_items = resp.get("items", [])
+        items.extend(page_items)
+        log.info(
+            f"[{medio.slug}] Search API: página {page_num} → {len(page_items)} vídeos "
+            f"(acumulado: {len(items)})"
+        )
+        for item in page_items:
+            log.info(f"[{medio.slug}]   video_id={item['id']['videoId']} title={item['snippet']['title'][:50]}")
+
+        page_token = resp.get("nextPageToken")
+        if not page_token or not full_scan:
+            break  # sin más páginas, o modo incremental (solo primera página)
+
+    log.info(f"[{medio.slug}] Search API: {len(items)} vídeos en total tras {page_num} página(s)")
     if not items:
         return []
 
@@ -288,7 +309,10 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         )
 
     db.commit()
-    log.info(f"[{medio.slug}] YouTube Shorts detect_new: {len(nuevas)} nuevos")
+    log.info(
+        f"[{medio.slug}] YouTube Shorts detect_new: "
+        f"escaneados={len(items)} | shorts={len(confirmed_shorts)} | nuevos={len(nuevas)}"
+    )
     return nuevas
 
 
