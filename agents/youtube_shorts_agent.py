@@ -199,12 +199,23 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         if not video_id or video_id not in confirmed_shorts:
             continue
 
-        # Evitar duplicados
-        existente = db.query(Publicacion).filter(
+        # Evitar duplicados — filtrar solo canal youtube_short
+        # (el mismo video_id puede existir como canal='youtube' si fue detectado antes como vídeo normal)
+        existe_short = db.query(Publicacion).filter(
             Publicacion.medio_id == medio.id,
+            Publicacion.canal == CanalEnum.youtube_short,
             Publicacion.id_externo == video_id,
         ).first()
-        if existente:
+        existe_youtube = db.query(Publicacion).filter(
+            Publicacion.medio_id == medio.id,
+            Publicacion.canal == CanalEnum.youtube,
+            Publicacion.id_externo == video_id,
+        ).first()
+        log.info(
+            f"[{medio.slug}] Verificando duplicado {video_id}: "
+            f"existe en youtube={bool(existe_youtube)}, existe en youtube_short={bool(existe_short)}"
+        )
+        if existe_short:
             continue
 
         snippet = item.get("snippet", {})
