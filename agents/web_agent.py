@@ -5,6 +5,7 @@ métricas de GA4 Data API.
 """
 import logging
 import hashlib
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -54,6 +55,27 @@ def _parse_date(entry) -> datetime:
     except Exception:
         pass
     return datetime.now(timezone.utc)
+
+
+def _fetch_date_published(url: str) -> Optional[datetime]:
+    """
+    Hace GET al artículo y extrae datePublished del JSON-LD.
+    Devuelve datetime UTC (sin hora) o None si falla o no encuentra el campo.
+    Timeout de 5s para no ralentizar detect_new.
+    """
+    try:
+        with httpx.Client(timeout=5, follow_redirects=True) as client:
+            resp = client.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; SocialIntelligence/1.0)"},
+            )
+            html = resp.text
+        match = re.search(r'"datePublished"\s*:\s*"(\d{4}-\d{2}-\d{2})', html)
+        if match:
+            return datetime.strptime(match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except Exception as ex:
+        log.debug(f"_fetch_date_published({url}): {ex}")
+    return None
 
 
 # ── Sitemap XML parser ────────────────────────────────────────────────────────
@@ -262,10 +284,11 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         if not url:
             continue
 
-        fecha = _parse_date(entry)
+        # lastmod se usa solo para el filtro de checkpoint (cuándo cambió el sitemap)
+        lastmod_fecha = _parse_date(entry)
 
-        # Filtrar por checkpoint
-        if checkpoint and fecha <= checkpoint:
+        # Filtrar por checkpoint usando lastmod (no datePublished, que puede ser anterior)
+        if checkpoint and lastmod_fecha <= checkpoint:
             continue
 
         # Evitar duplicados
@@ -276,6 +299,15 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         ).first()
         if existente:
             continue
+
+        # Obtener fecha real de publicación desde el HTML del artículo
+        fecha_real = _fetch_date_published(url)
+        if fecha_real:
+            fecha = fecha_real
+            log.debug(f"[{medio.slug}] datePublished={fecha.date()} para {url[:60]}")
+        else:
+            fecha = lastmod_fecha
+            log.debug(f"[{medio.slug}] datePublished no encontrado, usando lastmod={fecha.date()} para {url[:60]}")
 
         titulo = entry.get("title", "")
         resumen = entry.get("summary", "")[:500]
