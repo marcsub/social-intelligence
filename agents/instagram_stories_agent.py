@@ -250,6 +250,25 @@ def detect_and_update(db: Session, medio: Medio) -> list[Publicacion]:
             _snapshot_story(db, existente, insights, ahora)
             log.info(f"[{medio.slug}] Story {story_id}: reach={existente.reach} replies={existente.comments}")
 
+            # ── Reintentar descarga de imagen si aún no la tiene ───────────
+            sin_captura = (
+                not existente.captura_url
+                or existente.captura_url == "expired"
+            )
+            if sin_captura:
+                media_url = item.get("media_url") or item.get("thumbnail_url")
+                if media_url:
+                    log.info(f"[{medio.slug}] Story {story_id}: sin captura, reintentando descarga...")
+                    fecha_pub = existente.fecha_publicacion or ahora
+                    nueva_ruta = _download_story_image(medio, story_id, item, fecha_pub)
+                    if nueva_ruta:
+                        existente.captura_url = nueva_ruta
+                        log.info(f"[{medio.slug}] Story {story_id}: imagen descargada en {nueva_ruta}")
+                    else:
+                        log.warning(f"[{medio.slug}] Story {story_id}: descarga fallida, se reintentará")
+                else:
+                    log.info(f"[{medio.slug}] Story {story_id}: media_url no disponible aún, se reintentará")
+
     # Marcar como 'fijo' las stories en DB que ya no están en la API (caducadas)
     activas_en_db = (
         db.query(Publicacion)
