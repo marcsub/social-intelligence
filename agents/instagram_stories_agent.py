@@ -104,8 +104,15 @@ def _get_story_insights(token: str, story_id: str, raise_on_error: bool = False)
 
 
 def _download_story_image(medio: Medio, story_id: str, item: dict, fecha: datetime) -> Optional[str]:
-    """Descarga la imagen/thumbnail de una story y la guarda localmente."""
-    img_url = item.get("media_url") or item.get("thumbnail_url")
+    """
+    Descarga la imagen/thumbnail de una story y la guarda localmente.
+    Para stories de tipo VIDEO usa thumbnail_url (no media_url, que es el MP4).
+    """
+    media_type = item.get("media_type", "")
+    if media_type == "VIDEO":
+        img_url = item.get("thumbnail_url") or item.get("media_url")
+    else:
+        img_url = item.get("media_url") or item.get("thumbnail_url")
     if not img_url:
         return None
     try:
