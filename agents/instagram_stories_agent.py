@@ -41,6 +41,23 @@ GRAPH = "https://graph.facebook.com/v21.0"
 STORY_METRICS = "reach,replies,navigation"
 
 
+def _parse_ts(ts: str) -> datetime:
+    """
+    Parsea timestamps de Meta API ('+0000' sin dos puntos) de forma segura.
+    Python < 3.11 no acepta '+0000' en fromisoformat; normaliza a '+00:00'.
+    """
+    if not ts:
+        return datetime.now(timezone.utc)
+    try:
+        # Normalizar '+0000' → '+00:00' y '+HHMM' → '+HH:MM'
+        ts_norm = ts.replace("Z", "+00:00")
+        if len(ts_norm) > 6 and ts_norm[-5] in ("+", "-") and ":" not in ts_norm[-5:]:
+            ts_norm = ts_norm[:-2] + ":" + ts_norm[-2:]
+        return datetime.fromisoformat(ts_norm)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
 # ── Token helper ──────────────────────────────────────────────────────────────
 
 def _get_token(db: Session, medio_id: int, clave: str) -> Optional[str]:
@@ -138,7 +155,7 @@ def detect_and_update(db: Session, medio: Medio) -> list[Publicacion]:
         log.warning(f"[{medio.slug}] Faltan tokens Instagram para stories")
         return []
 
-    fields = "id,media_type,timestamp,permalink,media_url,thumbnail_url"
+    fields = "id,media_type,timestamp,permalink,media_url,thumbnail_url,caption"
     try:
         resp = _graph_get(f"/{ig_account_id}/stories", access_token, {"fields": fields})
     except Exception as ex:
@@ -152,6 +169,8 @@ def detect_and_update(db: Session, medio: Medio) -> list[Publicacion]:
     umbral    = config.umbral_confianza_marca if config else 80
     nuevas    = []
 
+    log.info(f"[{medio.slug}] Stories activas en API: {len(api_items)}")
+
     for item in api_items:
         story_id = item.get("id")
         if not story_id:
@@ -164,54 +183,61 @@ def detect_and_update(db: Session, medio: Medio) -> list[Publicacion]:
 
         if not existente:
             # ── Story nueva: insertar ───────────────────────────────────────
-            fecha_str = item.get("timestamp", "")
+            log.info(f"[{medio.slug}] Story {story_id}: nueva — insertando...")
             try:
-                fecha = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
-            except Exception:
-                fecha = ahora
+                fecha = _parse_ts(item.get("timestamp", ""))
+                permalink = item.get("permalink") or (
+                    f"https://www.instagram.com/stories/{ig_account_id}/{story_id}/"
+                )
+                caption = item.get("caption") or ""
+                captura_url = _download_story_image(medio, story_id, item, fecha)
 
-            permalink  = item.get("permalink", f"https://www.instagram.com/stories/{ig_account_id}/{story_id}/")
-            captura_url = _download_story_image(medio, story_id, item, fecha)
+                brand = identify(
+                    medio_id=medio.id, db=db,
+                    url=permalink,
+                    description=caption,
+                )
+                insights = _get_story_insights(access_token, story_id)
 
-            brand = identify(medio_id=medio.id, db=db, url=permalink)
-            insights = _get_story_insights(access_token, story_id)
+                estado_marca = (
+                    EstadoMarcaEnum.estimated if brand.marca_id and brand.confianza >= 80
+                    else EstadoMarcaEnum.to_review
+                )
 
-            estado_marca = (
-                EstadoMarcaEnum.estimated if brand.marca_id and brand.confianza >= 80
-                else EstadoMarcaEnum.to_review
-            )
+                pub = Publicacion(
+                    medio_id=medio.id,
+                    marca_id=brand.marca_id,
+                    agencia_id=brand.agencia_id,
+                    id_externo=story_id,
+                    canal=CanalEnum.instagram_story,
+                    tipo=TipoEnum.story,
+                    url=permalink,
+                    titulo=None,
+                    texto=caption or None,
+                    fecha_publicacion=fecha,
+                    reach=insights.get("reach", 0),
+                    likes=0,
+                    comments=insights.get("replies", 0),
+                    shares=0,
+                    clicks=insights.get("navigation", 0),
+                    estado_metricas=EstadoMetricasEnum.actualizado,  # se actualiza cada hora
+                    confianza_marca=brand.confianza if brand.confianza > 0 else None,
+                    estado_marca=estado_marca,
+                    captura_url=captura_url,
+                    notas=f"navigation={insights['navigation']}",
+                    ultima_actualizacion=ahora,
+                )
+                db.add(pub)
+                db.flush()
+                _snapshot_story(db, pub, insights, ahora)
 
-            pub = Publicacion(
-                medio_id=medio.id,
-                marca_id=brand.marca_id,
-                agencia_id=brand.agencia_id,
-                id_externo=story_id,
-                canal=CanalEnum.instagram_story,
-                tipo=TipoEnum.story,
-                url=permalink,
-                titulo=None,
-                fecha_publicacion=fecha,
-                reach=insights.get("reach", 0),
-                likes=0,
-                comments=insights.get("replies", 0),
-                shares=0,
-                clicks=insights.get("navigation", 0),
-                estado_metricas=EstadoMetricasEnum.actualizado,  # se actualiza cada hora
-                confianza_marca=brand.confianza if brand.confianza > 0 else None,
-                estado_marca=estado_marca,
-                captura_url=captura_url,
-                notas=f"navigation={insights['navigation']}",
-                ultima_actualizacion=ahora,
-            )
-            db.add(pub)
-            db.flush()
-            _snapshot_story(db, pub, insights, ahora)
-
-            nuevas.append(pub)
-            log.info(
-                f"[{medio.slug}] Story nueva {story_id}: "
-                f"reach={pub.reach} replies={pub.comments} marca={brand.marca_nombre or '?'}"
-            )
+                nuevas.append(pub)
+                log.info(
+                    f"[{medio.slug}] Story nueva {story_id}: "
+                    f"reach={pub.reach} replies={pub.comments} marca={brand.marca_nombre or '?'}"
+                )
+            except Exception as ex:
+                log.error(f"[{medio.slug}] Story {story_id}: error al insertar — {ex}", exc_info=True)
 
         elif existente.estado_metricas != EstadoMetricasEnum.fijo:
             # ── Story activa: actualizar métricas + snapshot ────────────────
