@@ -188,6 +188,11 @@ def detect_and_update(db: Session, medio: Medio) -> list[Publicacion]:
             Publicacion.id_externo == story_id,
         ).first()
 
+        log.info(
+            f"[{medio.slug}] Story {story_id}: "
+            f"{'nueva' if not existente else f'en DB estado={existente.estado_metricas}'}"
+        )
+
         if not existente:
             # ── Story nueva: insertar ───────────────────────────────────────
             log.info(f"[{medio.slug}] Story {story_id}: nueva — insertando...")
@@ -275,6 +280,10 @@ def detect_and_update(db: Session, medio: Medio) -> list[Publicacion]:
                         log.warning(f"[{medio.slug}] Story {story_id}: descarga fallida, se reintentará")
                 else:
                     log.info(f"[{medio.slug}] Story {story_id}: media_url no disponible aún, se reintentará")
+
+        else:
+            # Story en DB con estado='fijo' — ya caducó, no se actualiza
+            log.info(f"[{medio.slug}] Story {story_id}: estado=fijo, omitida (reach={existente.reach})")
 
     # Marcar como 'fijo' las stories en DB que ya no están en la API (caducadas)
     activas_en_db = (
