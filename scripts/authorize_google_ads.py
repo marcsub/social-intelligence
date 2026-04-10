@@ -11,11 +11,13 @@ Google Ads API habilitada, hay que activarla en:
   https://console.cloud.google.com/apis/library/googleads.googleapis.com
 
 Pasos:
-  1. Ejecutar este script
-  2. Abrir la URL que aparece en el navegador
-  3. Autorizar la app con la cuenta Google Ads
-  4. Copiar el código de autorización
-  5. El script guarda el access_token y refresh_token en DB (canal: google_ads)
+  1. Añadir en Google Cloud Console → Credenciales → roadrunning-youtube
+     → URIs de redireccionamiento autorizados:
+       http://localhost:8001/auth/google_ads/callback
+  2. Ejecutar este script (uvicorn puede seguir corriendo en :8000)
+  3. El navegador se abre automáticamente
+  4. Autorizar la app con la cuenta Google Ads
+  5. El script captura el código y guarda los tokens en DB (canal: google_ads)
 
 Nota: el developer_token y customer_id hay que añadirlos manualmente en el
 panel web (Configuración → Tokens API → google_ads).
@@ -26,7 +28,10 @@ import json
 import argparse
 import urllib.request
 import urllib.parse
+import urllib.error
 import webbrowser
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,7 +43,35 @@ from core.crypto import decrypt_token, encrypt_token
 GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords"
 TOKEN_URL        = "https://oauth2.googleapis.com/token"
 AUTH_URL         = "https://accounts.google.com/o/oauth2/v2/auth"
-REDIRECT_URI     = "urn:ietf:wg:oauth:2.0:oob"  # out-of-band, sin servidor local
+REDIRECT_URI     = "http://localhost:8001/auth/google_ads/callback"
+
+auth_code_received = None
+
+
+class CallbackHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        global auth_code_received
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        if "code" in params:
+            auth_code_received = params["code"][0]
+            self.send_response(200)
+            self.send_header("Content-type", "text/html; charset=utf-8")
+            self.end_headers()
+            html = (
+                "<html><body style='font-family:system-ui;text-align:center;padding:60px'>"
+                "<h2 style='color:#1d9e75'>Autorización Google Ads completada</h2>"
+                "<p>Puedes cerrar esta ventana y volver a la terminal.</p>"
+                "</body></html>"
+            )
+            self.wfile.write(html.encode("utf-8"))
+        else:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(b"Error en la autorizacion")
+
+    def log_message(self, format, *args):
+        pass
 
 
 def get_tok(db, medio_id, canal, clave, secret):
@@ -85,8 +118,8 @@ def main():
             print(f"ERROR: Medio '{args.slug}' no encontrado"); sys.exit(1)
 
         # Obtener client_id y client_secret del proyecto YouTube (mismo GCP)
-        client_id     = get_tok(db, medio.id, "youtube", "client_id")
-        client_secret = get_tok(db, medio.id, "youtube", "client_secret")
+        client_id     = get_tok(db, medio.id, "youtube", "client_id", secret)
+        client_secret = get_tok(db, medio.id, "youtube", "client_secret", secret)
 
         if not client_id or not client_secret:
             print("ERROR: client_id / client_secret de YouTube no encontrados en DB.")
@@ -99,6 +132,8 @@ def main():
         print("     https://console.cloud.google.com/apis/library/googleads.googleapis.com")
         print("  2. Tu developer_token de Google Ads (Tools → API Center)")
         print("  3. Tu customer_id (ID de cuenta Google Ads, sin guiones)")
+        print(f"  4. Redirect URI añadida en Google Cloud Console → Credenciales → roadrunning-youtube:")
+        print(f"     {REDIRECT_URI}")
         print()
 
         # Generar URL de autorización
@@ -111,28 +146,34 @@ def main():
             "prompt":        "consent",
         }
         auth_url = AUTH_URL + "?" + urllib.parse.urlencode(params)
-        print("Abre esta URL en tu navegador:")
+        print("Abriendo el navegador para autorizar el acceso a Google Ads...")
+        print("Si no se abre automáticamente, copia esta URL:")
         print(f"\n  {auth_url}\n")
 
-        try:
-            webbrowser.open(auth_url)
-            print("(Intentando abrir el navegador automáticamente...)\n")
-        except Exception:
-            pass
+        webbrowser.open(auth_url)
 
-        code = input("Pega aquí el código de autorización: ").strip()
-        if not code:
-            print("ERROR: no se proporcionó código"); sys.exit(1)
+        print(f"Esperando autorización en {REDIRECT_URI} ...")
+        print()
+
+        server = HTTPServer(("localhost", 8001), CallbackHandler)
+        server.handle_request()
+
+        if not auth_code_received:
+            print("ERROR: No se recibió el código de autorización.")
+            sys.exit(1)
+
+        print("Código recibido. Obteniendo tokens...")
 
         # Intercambiar código por tokens
         data = urllib.parse.urlencode({
-            "code":          code,
+            "code":          auth_code_received,
             "client_id":     client_id,
             "client_secret": client_secret,
             "redirect_uri":  REDIRECT_URI,
             "grant_type":    "authorization_code",
         }).encode()
         req = urllib.request.Request(TOKEN_URL, data=data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 tokens = json.loads(r.read())
@@ -152,23 +193,27 @@ def main():
         if refresh_token:
             save_tok(db, medio.id, "google_ads", "refresh_token", refresh_token, secret)
 
-        print(f"\n✓ access_token guardado en DB (canal=google_ads, clave=access_token)")
+        print()
+        print("=" * 55)
+        print("  Tokens guardados correctamente en la base de datos")
+        print("=" * 55)
+        print()
+        print(f"  access_token:  guardado y cifrado (canal=google_ads)")
         if refresh_token:
-            print(f"✓ refresh_token guardado en DB (canal=google_ads, clave=refresh_token)")
+            print(f"  refresh_token: guardado y cifrado (canal=google_ads)")
         print()
         print("Ahora añade manualmente en el panel (Configuración → Tokens API → google_ads):")
         print("  - developer_token  (Google Ads → Herramientas → Centro de API)")
         print("  - customer_id      (ID de tu cuenta Google Ads, sin guiones)")
         print()
         print("Para verificar la conexión:")
-        print(f"  cd /home/pirineos/social-intelligence && venv/bin/python -c \"")
-        print(f"  import sys; sys.path.insert(0,'.')")
-        print(f"  from agents import google_ads_agent")
-        print(f"  from core.settings import get_settings")
-        print(f"  from models.database import create_db_engine")
-        print(f"  from sqlalchemy.orm import Session")
-        print(f"  e=create_db_engine(get_settings().db_url)")
-        print(f"  with Session(e) as db: print(google_ads_agent.check_access(db, 1))\"")
+        print("  python -c \"import sys; sys.path.insert(0,'.')\"")
+        print("  from agents import google_ads_agent")
+        print("  from sqlalchemy.orm import Session")
+        print("  from models.database import create_db_engine")
+        print("  from core.settings import get_settings")
+        print("  e=create_db_engine(get_settings().db_url)")
+        print(f"  with Session(e) as db: print(google_ads_agent.check_access(db, {medio.id}))")
 
 
 if __name__ == "__main__":

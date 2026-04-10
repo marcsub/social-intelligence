@@ -105,11 +105,15 @@ def main():
         print("""
 Necesitas un short-lived User Access Token con los permisos:
   instagram_basic, instagram_manage_insights,
-  pages_show_list, pages_read_engagement, read_insights
+  pages_show_list, pages_read_engagement, read_insights,
+  pages_manage_metadata, ads_read
+
+  IMPORTANTE: ads_read es necesario para sincronizar métricas de
+  promoción pagada (Meta Ads). Asegúrate de marcarlo.
 
 Obtenerlo en: https://developers.facebook.com/tools/explorer/
   1. Selecciona tu App en el desplegable superior
-  2. Marca los permisos indicados
+  2. Marca los permisos indicados (incluyendo ads_read)
   3. Haz clic en "Generate Access Token" y copia el resultado
 """)
 

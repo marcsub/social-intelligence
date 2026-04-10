@@ -1,6 +1,6 @@
 """
 agents/google_ads_agent.py
-Sincronización de métricas de promoción pagada via Google Ads API REST v17.
+Sincronización de métricas de promoción pagada via Google Ads API REST v20.
 
 ESTADO ACTUAL: Requiere credenciales separadas de YouTube Data API.
 
@@ -22,13 +22,15 @@ Nota sobre el token YouTube existente:
 import logging
 import json
 import urllib.request
+import urllib.parse
 import urllib.error
 from decimal import Decimal
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
-GOOGLE_ADS_BASE = "https://googleads.googleapis.com/v17"
+GOOGLE_ADS_BASE = "https://googleads.googleapis.com/v20"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -45,22 +47,90 @@ def _get_token(db, medio_id: int, canal: str, clave: str):
     return decrypt_token(t.valor_cifrado, get_settings().jwt_secret) if t else None
 
 
-def _gaql_search(customer_id: str, developer_token: str, access_token: str, query: str) -> dict:
-    """Ejecuta una query GAQL contra la API REST de Google Ads."""
+def _save_token(db, medio_id: int, canal: str, clave: str, valor: str):
+    from models.database import TokenCanal
+    from core.crypto import encrypt_token
+    from core.settings import get_settings
+    secret = get_settings().jwt_secret
+    t = db.query(TokenCanal).filter(
+        TokenCanal.medio_id == medio_id,
+        TokenCanal.canal == canal,
+        TokenCanal.clave == clave,
+    ).first()
+    if t:
+        t.valor_cifrado = encrypt_token(valor, secret)
+    else:
+        db.add(TokenCanal(medio_id=medio_id, canal=canal, clave=clave,
+                          valor_cifrado=encrypt_token(valor, secret)))
+    db.commit()
+
+
+def _refresh_access_token(db, medio_id: int) -> str | None:
+    """
+    Refresca el access_token usando el refresh_token y lo guarda en DB.
+    Retorna el nuevo access_token o None si falla.
+    """
+    refresh_token = _get_token(db, medio_id, "google_ads", "refresh_token")
+    client_id     = _get_token(db, medio_id, "youtube", "client_id")
+    client_secret = _get_token(db, medio_id, "youtube", "client_secret")
+
+    if not refresh_token or not client_id or not client_secret:
+        return None
+
+    data = urllib.parse.urlencode({
+        "grant_type":    "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id":     client_id,
+        "client_secret": client_secret,
+    }).encode()
+    req = urllib.request.Request(GOOGLE_TOKEN_URL, data=data, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            tokens = json.loads(r.read())
+        new_token = tokens.get("access_token")
+        if new_token:
+            _save_token(db, medio_id, "google_ads", "access_token", new_token)
+            log.info(f"google_ads: access_token refrescado correctamente")
+            return new_token
+    except Exception as ex:
+        log.warning(f"google_ads: error refrescando access_token: {ex}")
+    return None
+
+
+def _gaql_search(
+    customer_id: str, developer_token: str, access_token: str, query: str,
+    db=None, medio_id: int = None,
+) -> dict:
+    """
+    Ejecuta una query GAQL contra la API REST de Google Ads.
+    Si recibe 401 y hay db/medio_id, refresca el access_token y reintenta.
+    """
     url = f"{GOOGLE_ADS_BASE}/customers/{customer_id}/googleAds:search"
     body = json.dumps({"query": query}).encode()
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "developer-token": developer_token,
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read())
+
+    def _do_request(token):
+        req = urllib.request.Request(
+            url, data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "developer-token": developer_token,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read())
+
+    try:
+        return _do_request(access_token)
+    except urllib.error.HTTPError as ex:
+        if ex.code == 401 and db is not None and medio_id is not None:
+            log.info("google_ads: access_token expirado, refrescando...")
+            new_token = _refresh_access_token(db, medio_id)
+            if new_token:
+                return _do_request(new_token)
+        raise
 
 
 # ── Verificación de acceso ────────────────────────────────────────────────────
@@ -92,7 +162,8 @@ def check_access(db, medio_id: int) -> tuple[bool, str]:
     try:
         result = _gaql_search(
             customer_id, developer_token, access_token,
-            "SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1"
+            "SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1",
+            db=db, medio_id=medio_id,
         )
         rows = result.get("results", [])
         name = rows[0]["customer"].get("descriptiveName", "") if rows else ""
@@ -111,6 +182,8 @@ def get_video_paid_metrics(
     customer_id: str,
     developer_token: str,
     access_token: str,
+    db=None,
+    medio_id: int = None,
 ) -> dict:
     """
     Obtiene impresiones e inversión de un vídeo de YouTube via GAQL.
@@ -129,7 +202,7 @@ def get_video_paid_metrics(
         AND segments.date DURING ALL_TIME
     """
     try:
-        data = _gaql_search(customer_id, developer_token, access_token, query)
+        data = _gaql_search(customer_id, developer_token, access_token, query, db=db, medio_id=medio_id)
         results = data.get("results", [])
         if not results:
             return {"reach_pagado": 0, "inversion_pagada": 0.0}
@@ -191,7 +264,8 @@ def sync_paid_metrics(db, medio) -> int:
     actualizadas = 0
     for pub in pubs:
         metrics = get_video_paid_metrics(
-            pub.id_externo, customer_id, developer_token, access_token
+            pub.id_externo, customer_id, developer_token, access_token,
+            db=db, medio_id=medio.id,
         )
         if metrics["reach_pagado"] > 0 or metrics["inversion_pagada"] > 0:
             pub.reach_pagado = metrics["reach_pagado"]
