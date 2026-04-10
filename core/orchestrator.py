@@ -16,6 +16,7 @@ from models.database import (
 )
 from agents import web_agent, youtube_agent, youtube_shorts_agent, instagram_agent, facebook_agent, threads_agent
 from agents import instagram_stories_agent
+from agents import meta_ads_agent, google_ads_agent
 from core.notifier import notify_daily
 from core.settings import get_settings
 
@@ -369,6 +370,17 @@ def _register_medio_jobs(scheduler, SessionLocal, medio: Medio):
         )
     log.info(f"[{slug}] Jobs semanales registrados (lunes 00:00→02:00 UTC)")
 
+    # Job semanal métricas pagadas — martes 03:00 UTC (después de todos los snapshots)
+    scheduler.add_job(
+        func=_job_weekly_paid_metrics,
+        trigger=CronTrigger(day_of_week="tue", hour=3, minute=0),
+        args=[SessionLocal, medio.id],
+        id=f"{slug}_weekly_paid_metrics",
+        replace_existing=True,
+        name=f"{slug} — Sync métricas pagadas (Ads)",
+    )
+    log.info(f"[{slug}] Job paid_metrics registrado (martes 03:00 UTC)")
+
 
 def _job_daily(SessionLocal, medio_id: int):
     """Función ejecutada por el scheduler — crea su propia sesión DB."""
@@ -529,6 +541,32 @@ def _job_weekly_threads(SessionLocal, medio_id: int):
             _run_weekly_agent(db, medio, "threads", threads_agent.snapshot_weekly)
 
 
+def _job_weekly_paid_metrics(SessionLocal, medio_id: int):
+    """Job semanal (martes 03:00 UTC) — sincroniza métricas pagadas desde Meta Ads y Google Ads."""
+    with SessionLocal() as db:
+        medio = db.get(Medio, medio_id)
+        if not medio or not medio.activo:
+            return
+        log_entry = _log_start(db, medio.id, "paid_metrics", "semanal")
+        errores = []
+        actualizadas = 0
+        try:
+            n = meta_ads_agent.sync_paid_metrics(db, medio)
+            actualizadas += n
+        except Exception as ex:
+            log.error(f"[{medio.slug}] Error meta_ads paid_metrics: {ex}")
+            errores.append({"fase": "meta_ads", "error": str(ex)})
+        try:
+            ok, _ = google_ads_agent.check_access(db, medio.id)
+            if ok:
+                n = google_ads_agent.sync_paid_metrics(db, medio)
+                actualizadas += n
+        except Exception as ex:
+            log.error(f"[{medio.slug}] Error google_ads paid_metrics: {ex}")
+            errores.append({"fase": "google_ads", "error": str(ex)})
+        _log_end(db, log_entry, actualizadas=actualizadas, errores=errores if errores else None)
+
+
 def _run_weekly_agent(db: Session, medio: Medio, agente_name: str, func) -> int:
     """
     Ejecuta un agente semanal con log propio en log_ejecuciones.
@@ -570,6 +608,8 @@ def run_semanal(db: Session, medio: Medio) -> dict:
         ("instagram",      lambda d, m: instagram_agent.snapshot_weekly(d, m)),
         ("facebook",       lambda d, m: facebook_agent.snapshot_weekly(d, m)),
         ("threads",        lambda d, m: threads_agent.snapshot_weekly(d, m)),
+        ("paid_meta",      lambda d, m: meta_ads_agent.sync_paid_metrics(d, m)),
+        ("paid_google",    lambda d, m: google_ads_agent.sync_paid_metrics(d, m) if google_ads_agent.check_access(d, m.id)[0] else 0),
     ]
 
     resumen: dict = {}

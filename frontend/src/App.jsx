@@ -373,13 +373,15 @@ function EntidadCRUD({ slug, tipo, api }) {
 
 // ── Tokens panel ──────────────────────────────────────────────────────────────
 const TOKEN_FIELDS = {
-  youtube:  [["client_id","Client ID"],["client_secret","Client Secret"],["refresh_token","Refresh Token"],["channel_id","Channel ID"]],
-  instagram:[["app_id","App ID"],["app_secret","App Secret"],["access_token","Access Token (long-lived)"],["instagram_account_id","Instagram Account ID"]],
-  facebook: [["page_id","Page ID"],["access_token","Access Token"]],
-  threads:  [["app_id","App ID"],["app_secret","App Secret"],["access_token","Access Token"],["threads_user_id","Threads User ID"]],
-  x:        [["bearer_token","Bearer Token"],["api_key","API Key"],["api_secret","API Secret"]],
-  tiktok:   [["client_key","Client Key"],["client_secret","Client Secret"],["access_token","Access Token"]],
-  ga4:      [["property_id","Property ID"],["service_account_json","Service Account JSON (completo)"]],
+  youtube:    [["client_id","Client ID"],["client_secret","Client Secret"],["refresh_token","Refresh Token"],["channel_id","Channel ID"]],
+  instagram:  [["app_id","App ID"],["app_secret","App Secret"],["access_token","Access Token (long-lived)"],["instagram_account_id","Instagram Account ID"]],
+  facebook:   [["page_id","Page ID"],["access_token","Access Token"]],
+  threads:    [["app_id","App ID"],["app_secret","App Secret"],["access_token","Access Token"],["threads_user_id","Threads User ID"]],
+  x:          [["bearer_token","Bearer Token"],["api_key","API Key"],["api_secret","API Secret"]],
+  tiktok:     [["client_key","Client Key"],["client_secret","Client Secret"],["access_token","Access Token"]],
+  ga4:        [["property_id","Property ID"],["service_account_json","Service Account JSON (completo)"]],
+  meta_ads:   [["ad_account_id","Ad Account ID (autodetectado si vacío)"]],
+  google_ads: [["developer_token","Developer Token (Google Ads → Herramientas → Centro de API)"],["customer_id","Customer ID (sin guiones)"],["access_token","Access Token (generado por authorize_google_ads.py)"]],
 };
 
 function TokensPanel({ slug, api }) {
