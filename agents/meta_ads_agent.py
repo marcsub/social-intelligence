@@ -64,7 +64,7 @@ def _get_ad_accounts(user_token: str) -> list:
         return data.get("data", [])
     except urllib.error.HTTPError as ex:
         body = ex.read().decode()
-        if ex.code == 403 or '"code": 10' in body or '"code":10' in body or '"code": 200' in body:
+        if ex.code == 403 or '"code": 10,' in body or '"code":10,' in body or '"code": 200,' in body or '"code":200,' in body:
             raise PermissionError("ads_read permission not granted")
         raise
 
