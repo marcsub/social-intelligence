@@ -80,6 +80,8 @@ def _pub_item(p: Publicacion, marcas_map: dict, agencias_map: dict, pub_marcas_m
         "likes": p.likes or 0,
         "shares": p.shares or 0,
         "comments": p.comments or 0,
+        "inversion_pagada": float(p.inversion_pagada) if p.inversion_pagada is not None else None,
+        "reach_pagado": p.reach_pagado or 0,
         "estado_metricas": p.estado_metricas.value if p.estado_metricas else None,
         "confianza_marca": p.confianza_marca,
         "estado_marca": p.estado_marca.value if p.estado_marca else None,
@@ -120,6 +122,8 @@ def _marca_analytics(db: Session, medio: Medio, marca_id: int, fd: datetime, fh:
         func.coalesce(func.sum(Publicacion.likes), 0).label("likes"),
         func.coalesce(func.sum(Publicacion.shares), 0).label("shares"),
         func.coalesce(func.sum(Publicacion.comments), 0).label("comments"),
+        func.coalesce(func.sum(Publicacion.reach_pagado), 0).label("reach_pagado"),
+        func.coalesce(func.sum(Publicacion.inversion_pagada), 0).label("inversion_pagada"),
     ).first()
 
     # Métricas por canal
@@ -129,18 +133,21 @@ def _marca_analytics(db: Session, medio: Medio, marca_id: int, fd: datetime, fh:
         func.coalesce(func.sum(Publicacion.likes), 0).label("likes"),
         func.coalesce(func.sum(Publicacion.shares), 0).label("shares"),
         func.coalesce(func.sum(Publicacion.comments), 0).label("comments"),
+        func.coalesce(func.sum(Publicacion.reach_pagado), 0).label("reach_pagado"),
     ).group_by(Publicacion.canal).all()
 
     reach_por_canal = {}
     likes_por_canal = {}
     shares_por_canal = {}
     comments_por_canal = {}
+    reach_pagado_por_canal = {}
     for r in canal_rows:
         k = r.canal.value
         reach_por_canal[k] = int(r.reach)
         likes_por_canal[k] = int(r.likes)
         shares_por_canal[k] = int(r.shares)
         comments_por_canal[k] = int(r.comments)
+        reach_pagado_por_canal[k] = int(r.reach_pagado)
 
     # Evolución mensual
     mes_rows = base.with_entities(
@@ -160,8 +167,12 @@ def _marca_analytics(db: Session, medio: Medio, marca_id: int, fd: datetime, fh:
             "likes": int(agg.likes),
             "shares": int(agg.shares),
             "comments": int(agg.comments),
+            "reach_pagado": int(agg.reach_pagado),
+            "inversion_pagada": float(agg.inversion_pagada) if agg.inversion_pagada else 0.0,
+            "reach_organico": max(0, int(agg.reach) - int(agg.reach_pagado)),
         },
         "reach_por_canal": reach_por_canal,
+        "reach_pagado_por_canal": reach_pagado_por_canal,
         "likes_por_canal": likes_por_canal,
         "shares_por_canal": shares_por_canal,
         "comments_por_canal": comments_por_canal,
@@ -219,6 +230,8 @@ def list_publicaciones(
 
     total = q.count()
     reach_total = q.with_entities(func.coalesce(func.sum(Publicacion.reach), 0)).scalar()
+    reach_pagado_total = q.with_entities(func.coalesce(func.sum(Publicacion.reach_pagado), 0)).scalar()
+    inversion_total = q.with_entities(func.coalesce(func.sum(Publicacion.inversion_pagada), 0)).scalar()
     en_revision = q.filter(Publicacion.estado_metricas == EstadoMetricasEnum.revisar).count()
 
     items_q = (
@@ -287,6 +300,9 @@ def list_publicaciones(
         "items": [_pub_item(p, marcas_map, agencias_map, pub_marcas_map, story_snapshots) for p in items_q],
         "total": total,
         "reach_total": int(reach_total),
+        "reach_pagado_total": int(reach_pagado_total),
+        "reach_total_combinado": int(reach_total) + int(reach_pagado_total),
+        "inversion_total": float(inversion_total) if inversion_total else 0.0,
         "en_revision": en_revision,
         "paginas": max(1, (total + per_page - 1) // per_page),
     }
@@ -409,6 +425,42 @@ def update_pub_marca(
     return {"ok": True, "marca_id": pub.marca_id, "estado_marca": pub.estado_marca.value}
 
 
+class PromocionUpdateBody(BaseModel):
+    inversion_pagada: Optional[float] = None
+    reach_pagado: Optional[int] = None
+
+
+@router.patch("/medios/{slug}/publicaciones/{pub_id}/promocion")
+def update_pub_promocion(
+    slug: str,
+    pub_id: int,
+    body: PromocionUpdateBody,
+    db: Session = Depends(get_db),
+    _=Auth,
+):
+    """Guarda inversión pagada y reach pagado de una publicación."""
+    medio = get_medio_or_404(slug, db)
+    pub = db.query(Publicacion).filter(
+        Publicacion.id == pub_id,
+        Publicacion.medio_id == medio.id,
+    ).first()
+    if not pub:
+        raise HTTPException(404, "Publicación no encontrada")
+
+    if body.inversion_pagada is not None:
+        from decimal import Decimal
+        pub.inversion_pagada = Decimal(str(body.inversion_pagada)) if body.inversion_pagada > 0 else None
+    if body.reach_pagado is not None:
+        pub.reach_pagado = max(0, body.reach_pagado)
+
+    db.commit()
+    return {
+        "ok": True,
+        "inversion_pagada": float(pub.inversion_pagada) if pub.inversion_pagada else None,
+        "reach_pagado": pub.reach_pagado or 0,
+    }
+
+
 class MarcasUpdateBody(BaseModel):
     marca_ids: list[int]
     estado_marca: str = "ok"
@@ -483,6 +535,12 @@ def analytics_resumen(
         except ValueError:
             pass
 
+    # Totales globales para el período
+    totales = base.with_entities(
+        func.coalesce(func.sum(Publicacion.reach_pagado), 0).label("reach_pagado_total"),
+        func.coalesce(func.sum(Publicacion.inversion_pagada), 0).label("inversion_total"),
+    ).first()
+
     # Reach por canal y mes
     rows = base.with_entities(
         func.date_format(Publicacion.fecha_publicacion, '%Y-%m').label('mes'),
@@ -524,6 +582,8 @@ def analytics_resumen(
             {"marca_id": r.marca_id, "nombre": marcas_map.get(r.marca_id, "?"), "reach": int(r.reach)}
             for r in top
         ],
+        "reach_pagado_total": int(totales.reach_pagado_total) if totales else 0,
+        "inversion_total": float(totales.inversion_total) if totales and totales.inversion_total else 0.0,
     }
 
 

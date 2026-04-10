@@ -6,7 +6,7 @@ Una base de datos compartida con todas las tablas prefijadas por medio.
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import (
-    create_engine, Column, String, Integer, Float, Text,
+    create_engine, Column, String, Integer, Float, Text, Numeric,
     DateTime, Boolean, ForeignKey, Enum, UniqueConstraint, Index
 )
 from sqlalchemy.orm import DeclarativeBase, relationship, Session
@@ -238,6 +238,10 @@ class Publicacion(Base):
     ga4_sessions        = Column(Integer, default=0)
     ga4_users           = Column(Integer, default=0)
 
+    # Promoción pagada
+    inversion_pagada    = Column(Numeric(10, 2), nullable=True)
+    reach_pagado        = Column(Integer, default=0)
+
     # Control
     estado_metricas     = Column(Enum(EstadoMetricasEnum), default=EstadoMetricasEnum.pendiente)
     confianza_marca     = Column(Integer, nullable=True)        # 0-100, null si manual
@@ -318,6 +322,10 @@ class HistorialMetricas(Base):
     shares_diff     = Column(Integer, default=0)
     comments_diff   = Column(Integer, default=0)
     clicks_diff     = Column(Integer, default=0)
+
+    # Promoción pagada (snapshot del momento)
+    reach_pagado    = Column(Integer, default=0)
+    inversion_pagada = Column(Numeric(10, 2), nullable=True)
 
     fuente          = Column(String(20), default="api")  # 'api' | 'ga4' | 'manual'
 

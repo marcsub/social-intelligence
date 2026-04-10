@@ -103,6 +103,10 @@ function fmtMetric(n) {
   if (n >= 1_000)     return (n / 1_000).toFixed(1) + "K";
   return n.toLocaleString("es-ES");
 }
+function fmtEuro(n) {
+  if (!n && n !== 0) return "—";
+  return n.toLocaleString("es-ES", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+}
 function getProximoLunes() {
   const d = new Date();
   const dow = d.getDay(); // 0=dom, 1=lun...
@@ -525,6 +529,62 @@ function MedioConfig({ slug, api }) {
   );
 }
 
+// ── Story popover ──────────────────────────────────────────────────────────────
+function StoryPopover({ item, x, y, imgUrl, onClose }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position:"fixed",
+        top: y,
+        left: x,
+        zIndex: 9999,
+        width: 380,
+        maxHeight: 600,
+        background:"#fff",
+        borderRadius:12,
+        boxShadow:"0 4px 24px rgba(0,0,0,0.18)",
+        border:"1px solid #e8e8e8",
+        display:"flex",
+        flexDirection:"column",
+        overflow:"hidden",
+      }}
+    >
+      {/* Header */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+        padding:"10px 14px", borderBottom:"1px solid #f0f0f0", flexShrink:0 }}>
+        <span style={{ fontSize:13, fontWeight:600, color:"#1a1a2e" }}>Captura de Story</span>
+        <button onClick={onClose}
+          style={{ background:"none", border:"none", cursor:"pointer", fontSize:16, color:"#aaa", lineHeight:1, padding:"0 2px" }}>✕</button>
+      </div>
+      {/* Imagen */}
+      <div style={{ overflowY:"auto", display:"flex", flexDirection:"column", alignItems:"center", padding:12, gap:12 }}>
+        <img
+          src={imgUrl}
+          alt="Captura story"
+          style={{ maxWidth:340, maxHeight:440, borderRadius:8, objectFit:"contain", width:"100%" }}
+        />
+        <div style={{ width:"100%", fontSize:13, color:"#444", display:"flex", flexDirection:"column", gap:4 }}>
+          <div><strong>Fecha:</strong> {fmtDate(item.fecha_publicacion)}</div>
+          <div><strong>Marca:</strong> {item.marca_nombre || "— sin marca —"}</div>
+          <div><strong>Reach:</strong> {fmtNum(item.reach)}</div>
+          <div><strong>Replies:</strong> {fmtNum(item.comments)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Publicaciones page ────────────────────────────────────────────────────────
 const PER_PAGE = 50;
 const CANALES_OPTS = [
@@ -820,6 +880,7 @@ function PublicacionesPage({ slug, api }) {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [marcaAsignar, setMarcaAsignar] = useState("");
   const [rowMarcas, setRowMarcas] = useState({});
+  const [rowPromo, setRowPromo] = useState({});
   const [rowSaving, setRowSaving] = useState({});
   const [storyModal, setStoryModal] = useState(null);
   const [hoveredRow, setHoveredRow] = useState(null);
@@ -837,6 +898,18 @@ function PublicacionesPage({ slug, api }) {
         data.items.forEach(i => {
           if (!(i.id in next)) {
             next[i.id] = i.marcas_ids?.length ? i.marcas_ids : (i.marca_id ? [i.marca_id] : []);
+          }
+        });
+        return next;
+      });
+      setRowPromo(prev => {
+        const next = { ...prev };
+        data.items.forEach(i => {
+          if (!(i.id in next)) {
+            next[i.id] = {
+              inversion_pagada: i.inversion_pagada != null ? i.inversion_pagada : "",
+              reach_pagado: i.reach_pagado > 0 ? i.reach_pagado : "",
+            };
           }
         });
         return next;
@@ -932,10 +1005,18 @@ function PublicacionesPage({ slug, api }) {
 
   const guardarMarcaInline = async (item) => {
     const marcaIds = (rowMarcas[item.id] ?? []).map(Number).filter(Boolean);
+    const promo = rowPromo[item.id] ?? {};
     setRowSaving(prev => ({ ...prev, [item.id]: true }));
     try {
       await api("PATCH", `/medios/${slug}/publicaciones/${item.id}/marcas`, {
         marca_ids: marcaIds, estado_marca: "ok",
+      });
+      // Guardar promoción si hay datos
+      const inversion = promo.inversion_pagada !== "" ? parseFloat(promo.inversion_pagada) || 0 : 0;
+      const reachPag = promo.reach_pagado !== "" ? parseInt(promo.reach_pagado) || 0 : 0;
+      await api("PATCH", `/medios/${slug}/publicaciones/${item.id}/promocion`, {
+        inversion_pagada: inversion,
+        reach_pagado: reachPag,
       });
       const primaryId = marcaIds[0] ?? null;
       const primaryNombre = primaryId ? marcas.find(m => m.id === primaryId)?.nombre_canonico : null;
@@ -947,11 +1028,14 @@ function PublicacionesPage({ slug, api }) {
             ? { ...i, marca_id: primaryId, marca_nombre: primaryNombre,
                 marcas_ids: marcaIds, marcas_nombres: marcasNombres,
                 estado_marca: "ok",
+                inversion_pagada: inversion > 0 ? inversion : null,
+                reach_pagado: reachPag,
                 estado_metricas: i.estado_metricas === "revisar" ? "pendiente" : i.estado_metricas }
             : i
         ),
       }));
       setRowMarcas(prev => ({ ...prev, [item.id]: marcaIds }));
+      setRowPromo(prev => ({ ...prev, [item.id]: { inversion_pagada: inversion || "", reach_pagado: reachPag || "" } }));
     } catch (ex) { setErr(ex.message); }
     finally { setRowSaving(prev => ({ ...prev, [item.id]: false })); }
   };
@@ -1021,8 +1105,26 @@ function PublicacionesPage({ slug, api }) {
             </div>
             <div style={{ background:"#f5f6fa", borderRadius:8, padding:"8px 14px", fontSize:13 }}>
               <span style={{ fontWeight:600, color:"#185FA5" }}>{fmtNum(data.reach_total)}</span>
-              <span style={{ color:"#888", marginLeft:5 }}>reach total</span>
+              <span style={{ color:"#888", marginLeft:5 }}>reach orgánico</span>
             </div>
+            {data.reach_pagado_total > 0 && (
+              <div style={{ background:"#fdebd0", borderRadius:8, padding:"8px 14px", fontSize:13 }}>
+                <span style={{ fontWeight:600, color:"#E67E22" }}>{fmtNum(data.reach_pagado_total)}</span>
+                <span style={{ color:"#784212", marginLeft:5 }}>reach pagado</span>
+              </div>
+            )}
+            {data.reach_total_combinado > 0 && data.reach_pagado_total > 0 && (
+              <div style={{ background:"#f5f6fa", borderRadius:8, padding:"8px 14px", fontSize:13 }}>
+                <span style={{ fontWeight:600, color:"#1a1a2e" }}>{fmtNum(data.reach_total_combinado)}</span>
+                <span style={{ color:"#888", marginLeft:5 }}>reach total</span>
+              </div>
+            )}
+            {data.inversion_total > 0 && (
+              <div style={{ background:"#fdebd0", borderRadius:8, padding:"8px 14px", fontSize:13 }}>
+                <span style={{ fontWeight:600, color:"#E67E22" }}>{fmtEuro(data.inversion_total)}</span>
+                <span style={{ color:"#784212", marginLeft:5 }}>inversión</span>
+              </div>
+            )}
             {data.en_revision > 0 && (
               <div style={{ background:"#FAEEDA", borderRadius:8, padding:"8px 14px", fontSize:13 }}>
                 <span style={{ fontWeight:600, color:"#854F0B" }}>{data.en_revision}</span>
@@ -1076,6 +1178,8 @@ function PublicacionesPage({ slug, api }) {
                   <th style={{...s.th, minWidth:160}}>Marca</th>
                   <th style={{...s.th, textAlign:"right"}}>Reach</th>
                   <th style={{...s.th, textAlign:"right"}}>Likes</th>
+                  <th style={{...s.th, textAlign:"right", minWidth:90}}>Inversión €</th>
+                  <th style={{...s.th, textAlign:"right", minWidth:90}}>Reach pag.</th>
                   <th style={s.th}>Métricas</th>
                   <th style={s.th}>Acción</th>
                 </tr>
@@ -1085,6 +1189,13 @@ function PublicacionesPage({ slug, api }) {
                   const marcasActual = (rowMarcas[item.id] ?? item.marcas_ids ?? (item.marca_id ? [item.marca_id] : [])).map(Number).filter(Boolean);
                   const marcasOriginal = (item.marcas_ids?.length ? item.marcas_ids : (item.marca_id ? [item.marca_id] : [])).map(Number).filter(Boolean);
                   const marcaCambiada = JSON.stringify([...marcasActual].sort()) !== JSON.stringify([...marcasOriginal].sort());
+                  const promoActual = rowPromo[item.id] ?? {};
+                  const inversionActual = promoActual.inversion_pagada !== "" ? parseFloat(promoActual.inversion_pagada) || 0 : 0;
+                  const reachPagActual = promoActual.reach_pagado !== "" ? parseInt(promoActual.reach_pagado) || 0 : 0;
+                  const inversionOrig = item.inversion_pagada != null ? item.inversion_pagada : 0;
+                  const reachPagOrig = item.reach_pagado || 0;
+                  const promoCambiada = inversionActual !== inversionOrig || reachPagActual !== reachPagOrig;
+                  const hayCambios = marcaCambiada || promoCambiada;
                   const rowBg = selected.has(item.id) || hoveredRow === item.id
                     ? "#EBF4FF"
                     : idx % 2 === 0 ? "#ffffff" : "#f7f8fb";
@@ -1105,6 +1216,11 @@ function PublicacionesPage({ slug, api }) {
                     {/* Canal */}
                     <td style={s.td}>
                       <CanalCell canal={item.canal} tipo={item.tipo} />
+                      {item.inversion_pagada > 0 && (
+                        <span style={{ display:"block", marginTop:3, padding:"1px 6px", borderRadius:10, fontSize:10, fontWeight:600, background:"#fdebd0", color:"#784212", border:"1px solid #f0a500" }}>
+                          Patrocinado
+                        </span>
+                      )}
                     </td>
 
                     {/* Contenido */}
@@ -1114,7 +1230,14 @@ function PublicacionesPage({ slug, api }) {
                           const cap = item.captura_url;
                           if (cap && cap !== "expired") {
                             return (
-                              <span title="Ver captura" onClick={() => setStoryModal(item)}
+                              <span title="Ver captura" onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                let x = rect.right + 8;
+                                let y = rect.top;
+                                if (x + 420 > window.innerWidth) x = rect.left - 420 - 8;
+                                if (y + 650 > window.innerHeight) y = window.innerHeight - 650 - 8;
+                                setStoryModal({ item, x, y });
+                              }}
                                 style={{ fontSize:15, cursor:"pointer", flexShrink:0, userSelect:"none",
                                   background:"#e6f9ec", borderRadius:4, padding:"1px 4px",
                                   border:"1px solid #a3d9b0", lineHeight:1.4 }}>📷</span>
@@ -1178,6 +1301,36 @@ function PublicacionesPage({ slug, api }) {
                       {fmtMetric(item.likes)}
                     </td>
 
+                    {/* Inversión € */}
+                    <td style={{...s.td, textAlign:"right"}}>
+                      {item.canal !== "web" ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={(rowPromo[item.id] ?? {}).inversion_pagada ?? ""}
+                          onChange={e => setRowPromo(prev => ({ ...prev, [item.id]: { ...(prev[item.id] ?? {}), inversion_pagada: e.target.value } }))}
+                          style={{ width:74, padding:"3px 6px", border:"1px solid #ddd", borderRadius:5, fontSize:12, textAlign:"right", background: (rowPromo[item.id] ?? {}).inversion_pagada > 0 ? "#fef9f0" : "#fff" }}
+                        />
+                      ) : <span style={{color:"#ddd",fontSize:12}}>—</span>}
+                    </td>
+
+                    {/* Reach pagado */}
+                    <td style={{...s.td, textAlign:"right"}}>
+                      {item.canal !== "web" ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="0"
+                          value={(rowPromo[item.id] ?? {}).reach_pagado ?? ""}
+                          onChange={e => setRowPromo(prev => ({ ...prev, [item.id]: { ...(prev[item.id] ?? {}), reach_pagado: e.target.value } }))}
+                          style={{ width:74, padding:"3px 6px", border:"1px solid #ddd", borderRadius:5, fontSize:12, textAlign:"right", background: (rowPromo[item.id] ?? {}).reach_pagado > 0 ? "#fef9f0" : "#fff" }}
+                        />
+                      ) : <span style={{color:"#ddd",fontSize:12}}>—</span>}
+                    </td>
+
                     {/* Métricas */}
                     <td style={s.td}>
                       <EstadoMetricasBadge estado={item.estado_metricas} intentos={item.intentos_fallidos} />
@@ -1195,7 +1348,7 @@ function PublicacionesPage({ slug, api }) {
                           style={{ color:"#aaa", fontSize:13, textDecoration:"none", marginRight:6 }}
                           title="Abrir enlace">↗</a>
                       )}
-                      {marcaCambiada ? (
+                      {hayCambios ? (
                         <button
                           style={{ padding:"3px 10px", borderRadius:6, border:"1px solid #185FA5",
                             background:"#185FA5", color:"#fff", cursor:"pointer", fontSize:12, fontWeight:500 }}
@@ -1211,7 +1364,7 @@ function PublicacionesPage({ slug, api }) {
                   );
                 })}
                 {items.length === 0 && (
-                  <tr><td colSpan={9} style={{...s.td, color:"#aaa", textAlign:"center", padding:32}}>
+                  <tr><td colSpan={11} style={{...s.td, color:"#aaa", textAlign:"center", padding:32}}>
                     Sin publicaciones para los filtros seleccionados
                   </td></tr>
                 )}
@@ -1248,43 +1401,19 @@ function PublicacionesPage({ slug, api }) {
         )}
       </div>
 
-      {/* Modal lightbox de captura de Story */}
-      {storyModal && (
-        <div
-          onClick={() => setStoryModal(null)}
-          style={{
-            position:"absolute", top:0, left:0, right:0, minHeight:"100%",
-            background:"rgba(0,0,0,0.6)", zIndex:1000,
-            display:"flex", alignItems:"flex-start", justifyContent:"center",
-            paddingTop:60, paddingBottom:40,
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background:"#fff", borderRadius:12, padding:24,
-              maxWidth:440, width:"100%", boxShadow:"0 8px 32px rgba(0,0,0,0.35)",
-              display:"flex", flexDirection:"column", alignItems:"center", gap:16,
-            }}
-          >
-            <img
-              src={storyImgUrl(storyModal.captura_url)}
-              alt="Captura story"
-              style={{ maxWidth:400, maxHeight:600, borderRadius:8, objectFit:"contain", width:"100%" }}
-            />
-            <div style={{ width:"100%", fontSize:13, color:"#444", display:"flex", flexDirection:"column", gap:4 }}>
-              <div><strong>Fecha:</strong> {fmtDate(storyModal.fecha_publicacion)}</div>
-              <div><strong>Marca:</strong> {storyModal.marca_nombre || "— sin marca —"}</div>
-              <div><strong>Reach:</strong> {fmtNum(storyModal.reach)}</div>
-              <div><strong>Replies:</strong> {fmtNum(storyModal.comments)}</div>
-            </div>
-            <button
-              onClick={() => setStoryModal(null)}
-              style={{ ...s.btn("ghost"), alignSelf:"flex-end" }}
-            >Cerrar</button>
-          </div>
-        </div>
-      )}
+      {/* Popover captura de Story (position:fixed, sigue scroll) */}
+      {storyModal && (() => {
+        const { item: sm, x, y } = storyModal;
+        return (
+          <StoryPopover
+            item={sm}
+            x={x}
+            y={y}
+            imgUrl={storyImgUrl(sm.captura_url)}
+            onClose={() => setStoryModal(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -1348,22 +1477,72 @@ function MarcaAnalyticsView({ data, semanalData = null, compact = false }) {
       borderColor:"#6c63ff", backgroundColor:"rgba(108,99,255,0.1)", tension:0.3, fill:true }],
   } : null;
 
+  const hasPaid = data.kpis.inversion_pagada > 0 || data.kpis.reach_pagado > 0;
+
+  // Build stacked bar data for reach orgánico + pagado per canal
+  const stackedReachData = (() => {
+    const canales = Object.keys(data.reach_por_canal || {});
+    if (!canales.length) return null;
+    return {
+      labels: canales.map(c => CANAL_LABELS[c] || c),
+      datasets: [
+        {
+          label: "Reach orgánico",
+          data: canales.map(c => Math.max(0, (data.reach_por_canal[c] || 0) - (data.reach_pagado_por_canal?.[c] || 0))),
+          backgroundColor: canales.map(c => CANAL_COLORS[c] || "#999"),
+          borderRadius: 4,
+        },
+        {
+          label: "Reach pagado",
+          data: canales.map(c => data.reach_pagado_por_canal?.[c] || 0),
+          backgroundColor: "#E67E22",
+          borderRadius: 4,
+        },
+      ],
+    };
+  })();
+
   return (
     <div>
       {!compact && <div style={{ fontWeight:600, fontSize:15, marginBottom:14, color:"#6c63ff" }}>{data.marca_nombre}</div>}
-      <div style={s.kpiGrid}>
-        <KpiCard label="Reach" value={data.kpis.reach} />
+      <div style={{ display:"grid", gridTemplateColumns: hasPaid ? "repeat(4,1fr)" : "repeat(5,1fr)", gap:12, marginBottom:20 }}>
+        <KpiCard label="Reach orgánico" value={data.kpis.reach_organico ?? data.kpis.reach} />
         <KpiCard label="Publicaciones" value={data.kpis.publicaciones} color="#1d9e75" />
         <KpiCard label="Likes" value={data.kpis.likes} color="#D4537E" />
         <KpiCard label="Shares" value={data.kpis.shares} color="#185FA5" />
-        <KpiCard label="Comentarios" value={data.kpis.comments} color="#f59e0b" />
+        {!hasPaid && <KpiCard label="Comentarios" value={data.kpis.comments} color="#f59e0b" />}
       </div>
+      {hasPaid && (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:20 }}>
+          <div style={{ ...s.kpiCard, border:"1px solid #f0a500", background:"#fef9f0" }}>
+            <div style={{ fontSize:22, fontWeight:700, color:"#E67E22" }}>{fmtEuro(data.kpis.inversion_pagada)}</div>
+            <div style={{ fontSize:11, color:"#888", marginTop:4 }}>Inversión total</div>
+          </div>
+          <div style={{ ...s.kpiCard, border:"1px solid #f0a500", background:"#fef9f0" }}>
+            <div style={{ fontSize:22, fontWeight:700, color:"#E67E22" }}>{fmtNum(data.kpis.reach_pagado)}</div>
+            <div style={{ fontSize:11, color:"#888", marginTop:4 }}>Reach pagado</div>
+          </div>
+          <div style={{ ...s.kpiCard }}>
+            <div style={{ fontSize:22, fontWeight:700, color:"#6c63ff" }}>{fmtNum((data.kpis.reach_organico ?? data.kpis.reach) + data.kpis.reach_pagado)}</div>
+            <div style={{ fontSize:11, color:"#888", marginTop:4 }}>Reach total combinado</div>
+          </div>
+        </div>
+      )}
 
       {!compact && (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16 }}>
           <div style={s.chartBox}>
-            <div style={{ fontSize:13, fontWeight:600, marginBottom:12 }}>Reach por canal</div>
-            <MarcaReachBars data={data.reach_por_canal} />
+            <div style={{ fontSize:13, fontWeight:600, marginBottom:12 }}>Reach por canal {hasPaid ? "(orgánico + pagado)" : ""}</div>
+            {hasPaid && stackedReachData ? (
+              <ChartCanvas
+                type="bar"
+                data={stackedReachData}
+                options={{ scales: { x: { stacked:true }, y: { stacked:true, ticks: { callback: v => fmtNum(v) } } }, plugins: { legend: { position:"bottom" } } }}
+                height={200}
+              />
+            ) : (
+              <MarcaReachBars data={data.reach_por_canal} />
+            )}
           </div>
           <div style={s.chartBox}>
             <div style={{ fontSize:13, fontWeight:600, marginBottom:12 }}>Distribución porcentual</div>

@@ -571,6 +571,8 @@ def snapshot_weekly(db: Session, medio: Medio) -> int:
                     shares=shares_actual, shares_diff=shares_diff,
                     comments=pub.comments, comments_diff=0,
                     clicks=0, clicks_diff=0, fuente="api",
+                    reach_pagado=pub.reach_pagado or 0,
+                    inversion_pagada=pub.inversion_pagada,
                 ))
 
             pub.reach = reach_actual; pub.likes = likes_actual; pub.shares = shares_actual

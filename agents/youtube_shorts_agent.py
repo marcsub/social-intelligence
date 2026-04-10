@@ -493,6 +493,8 @@ def snapshot_weekly(db: Session, medio: Medio) -> int:
                         shares=0, shares_diff=diff_shares,
                         comments=acumulado_comments, comments_diff=diff_comments,
                         clicks=0, clicks_diff=0, fuente="api",
+                        reach_pagado=pub.reach_pagado or 0,
+                        inversion_pagada=pub.inversion_pagada,
                     ))
                     db.flush()
 

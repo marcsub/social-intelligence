@@ -411,6 +411,8 @@ def snapshot_weekly(db: Session, medio: Medio) -> int:
                     shares=0, shares_diff=0,
                     comments=comments_actual, comments_diff=comments_diff,
                     clicks=0, clicks_diff=0, fuente="api",
+                    reach_pagado=pub.reach_pagado or 0,
+                    inversion_pagada=pub.inversion_pagada,
                 ))
 
             pub.reach = reach_actual; pub.likes = likes_actual; pub.comments = comments_actual
@@ -561,6 +563,8 @@ def update_weekly_youtube(db: Session, medio: Medio) -> int:
                         comments=acumulado_comments, comments_diff=diff_comments,
                         clicks=0, clicks_diff=0,
                         fuente="api",
+                        reach_pagado=pub.reach_pagado or 0,
+                        inversion_pagada=pub.inversion_pagada,
                     ))
                     db.flush()
 
