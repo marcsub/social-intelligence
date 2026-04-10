@@ -158,6 +158,8 @@ def check_access(db, medio_id: int) -> tuple[bool, str]:
             "  4. Añadir developer_token y customer_id en panel → Tokens API → google_ads"
         )
 
+    log.info(f"google_ads check_access: customer_id={customer_id[:10]}... dev_token={developer_token[:10]}...")
+
     # Intentar listar campañas (query mínima para verificar conectividad)
     try:
         result = _gaql_search(
@@ -169,9 +171,11 @@ def check_access(db, medio_id: int) -> tuple[bool, str]:
         name = rows[0]["customer"].get("descriptiveName", "") if rows else ""
         return True, f"Conectado. Cuenta: {name} ({customer_id})"
     except urllib.error.HTTPError as ex:
-        body = ex.read().decode()[:300]
+        body = ex.read().decode()
+        log.error(f"google_ads HTTP {ex.code} — error completo:\n{body}")
         return False, f"HTTP {ex.code}: {body}"
     except Exception as ex:
+        log.error(f"google_ads error inesperado: {ex}")
         return False, str(ex)
 
 
