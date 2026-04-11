@@ -134,12 +134,14 @@ def _get_valid_token(db: Session, medio_id: int) -> Optional[str]:
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 
-def _api_post(path: str, token: str, payload: dict) -> dict:
+def _api_post(path: str, token: str, payload: dict, fields: str = None) -> dict:
     """
     POST a TikTok Open Platform API v2.
-    Lanza excepción en caso de error HTTP.
+    `fields` va como query param en la URL; el resto del payload en el body JSON.
     """
-    url  = BASE_URL + path
+    url = BASE_URL + path
+    if fields:
+        url += "?" + urllib.parse.urlencode({"fields": fields})
     body = json.dumps(payload).encode("utf-8")
     req  = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Authorization", f"Bearer {token}")
@@ -158,12 +160,11 @@ def _fetch_videos(db: Session, medio_id: int, token: str, cursor: int = 0) -> di
     payload = {
         "max_count": MAX_PER_PAGE,
         "cursor":    cursor,
-        "fields":    VIDEO_FIELDS,
     }
 
     for attempt in range(2):
         try:
-            resp = _api_post("/video/list/", token, payload)
+            resp = _api_post("/video/list/", token, payload, fields=VIDEO_FIELDS)
             err  = resp.get("error", {})
             code = err.get("code", "ok")
 
@@ -253,32 +254,32 @@ def _parse_video(video: dict, medio: Medio, db: Session) -> Optional[Publicacion
     shares   = int(video.get("share_count",   0) or 0)
 
     # Identificar marca
-    texto_completo = titulo
-    marca_id, confianza = identify(db, texto_completo)
-    if confianza >= 80:
-        estado_marca = EstadoMarcaEnum.estimated
-    else:
-        estado_marca = EstadoMarcaEnum.to_review
+    brand = identify(medio_id=medio.id, db=db, caption=titulo, hashtags=[], url=share_url)
+    estado_marca = (
+        EstadoMarcaEnum.estimated if brand.marca_id and brand.confianza >= 80
+        else EstadoMarcaEnum.to_review
+    )
 
     estado_metricas = EstadoMetricasEnum.actualizado if reach > 0 else EstadoMetricasEnum.pendiente
 
     pub = Publicacion(
-        medio_id          = medio.id,
-        canal             = CanalEnum.tiktok,
-        tipo              = TipoEnum.video,
-        external_id       = video_id,
-        url               = share_url,
-        titulo            = titulo[:500] if titulo else None,
-        texto             = titulo[:2000] if titulo else None,
-        thumbnail_url     = video.get("cover_image_url"),
-        fecha_publicacion = fecha,
-        reach             = reach,
-        likes             = likes,
-        comentarios       = comments,
-        shares            = shares,
-        marca_id          = marca_id,
-        estado_marca      = estado_marca,
-        estado_metricas   = estado_metricas,
+        medio_id             = medio.id,
+        canal                = CanalEnum.tiktok,
+        tipo                 = TipoEnum.video,
+        id_externo           = video_id,
+        url                  = share_url,
+        titulo               = titulo[:500] if titulo else None,
+        texto                = titulo[:2000] if titulo else None,
+        fecha_publicacion    = fecha,
+        reach                = reach,
+        likes                = likes,
+        comments             = comments,
+        shares               = shares,
+        marca_id             = brand.marca_id,
+        agencia_id           = brand.agencia_id,
+        confianza_marca      = brand.confianza if brand.confianza > 0 else None,
+        estado_marca         = estado_marca,
+        estado_metricas      = estado_metricas,
         ultima_actualizacion = datetime.now(timezone.utc),
     )
     return pub
@@ -307,7 +308,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         existe = db.query(Publicacion).filter(
             Publicacion.medio_id    == medio.id,
             Publicacion.canal       == CanalEnum.tiktok,
-            Publicacion.external_id == video_id,
+            Publicacion.id_externo == video_id,
         ).first()
         if existe:
             continue
@@ -337,7 +338,7 @@ def update_metrics(db: Session, medio: Medio, publicaciones: list[Publicacion]) 
     """
     Actualiza las métricas de una lista de publicaciones TikTok.
     TikTok v2 no tiene endpoint individual de métricas; usamos video/list/ completo
-    y cruzamos por external_id.
+    y cruzamos por id_externo.
     Devuelve el número de publicaciones actualizadas.
     """
     token = _get_valid_token(db, medio.id)
@@ -345,8 +346,8 @@ def update_metrics(db: Session, medio: Medio, publicaciones: list[Publicacion]) 
         log.error(f"[{medio.slug}/tiktok] No hay access_token para update_metrics")
         return 0
 
-    # Construir mapa external_id → Publicacion
-    id_map = {p.external_id: p for p in publicaciones if p.external_id}
+    # Construir mapa id_externo → Publicacion
+    id_map = {p.id_externo: p for p in publicaciones if p.id_externo}
     if not id_map:
         return 0
 
@@ -359,7 +360,7 @@ def update_metrics(db: Session, medio: Medio, publicaciones: list[Publicacion]) 
         pub = id_map[video_id]
         pub.reach        = int(video.get("view_count",    0) or 0)
         pub.likes        = int(video.get("like_count",    0) or 0)
-        pub.comentarios  = int(video.get("comment_count", 0) or 0)
+        pub.comments     = int(video.get("comment_count", 0) or 0)
         pub.shares       = int(video.get("share_count",   0) or 0)
         pub.thumbnail_url = video.get("cover_image_url") or pub.thumbnail_url
 
@@ -422,7 +423,7 @@ def snapshot_weekly(db: Session, medio: Medio) -> int:
             reach_diff     = max(0, reach_diff),
             likes          = pub.likes or 0,
             shares         = pub.shares or 0,
-            comentarios    = pub.comentarios or 0,
+            comentarios    = pub.comments or 0,
             fecha_snapshot = datetime.now(timezone.utc),
         )
         db.add(snap)
