@@ -181,6 +181,92 @@ def check_access(db, medio_id: int) -> tuple[bool, str]:
 
 # ── Métricas pagadas por vídeo ────────────────────────────────────────────────
 
+def _fetch_video_metrics_map(
+    customer_id: str,
+    developer_token: str,
+    access_token: str,
+    db=None,
+    medio_id: int = None,
+) -> dict:
+    """
+    Construye un mapa {youtube_video_id: {"impressions": int, "cost_micros": int}}
+    usando dos queries GAQL:
+      1. assets YOUTUBE_VIDEO  → asset_resource_name → youtube_video_id
+      2. ad_group_ad VIDEO_RESPONSIVE_AD → asset_resource_name + métricas
+    """
+    # 1. Mapa asset_resource_name → youtube_video_id
+    asset_q = (
+        "SELECT asset.resource_name, asset.youtube_video_asset.youtube_video_id "
+        "FROM asset WHERE asset.type = YOUTUBE_VIDEO LIMIT 1000"
+    )
+    try:
+        asset_data = _gaql_search(
+            customer_id, developer_token, access_token, asset_q,
+            db=db, medio_id=medio_id,
+        )
+    except Exception as ex:
+        log.warning(f"google_ads: error obteniendo assets YouTube: {ex}")
+        return {}
+
+    asset_map: dict[str, str] = {}  # asset_resource_name → youtube_video_id
+    for row in asset_data.get("results", []):
+        a = row.get("asset", {})
+        rn = a.get("resourceName", "")
+        yt_id = a.get("youtubeVideoAsset", {}).get("youtubeVideoId", "")
+        if rn and yt_id:
+            asset_map[rn] = yt_id
+
+    if not asset_map:
+        log.warning("google_ads: no se encontraron assets de tipo YOUTUBE_VIDEO")
+        return {}
+
+    log.info(f"google_ads: {len(asset_map)} assets YouTube encontrados")
+
+    # 2. Métricas por ad_group_ad (VIDEO_RESPONSIVE_AD) con sus asset de vídeo
+    metrics_q = (
+        "SELECT ad_group_ad.ad.video_responsive_ad.videos, "
+        "metrics.impressions, metrics.cost_micros "
+        "FROM ad_group_ad "
+        "WHERE segments.date DURING LAST_365_DAYS "
+        "AND metrics.impressions > 0 "
+        "LIMIT 1000"
+    )
+    try:
+        metrics_data = _gaql_search(
+            customer_id, developer_token, access_token, metrics_q,
+            db=db, medio_id=medio_id,
+        )
+    except Exception as ex:
+        log.warning(f"google_ads: error obteniendo métricas ad_group_ad: {ex}")
+        return {}
+
+    # 3. Agregar por youtube_video_id
+    result: dict[str, dict] = {}
+    for row in metrics_data.get("results", []):
+        met = row.get("metrics", {})
+        impressions = int(met.get("impressions", 0) or 0)
+        cost_micros = int(met.get("costMicros", 0) or 0)
+        if not impressions and not cost_micros:
+            continue
+        videos = (
+            row.get("adGroupAd", {})
+               .get("ad", {})
+               .get("videoResponsiveAd", {})
+               .get("videos", [])
+        )
+        for v in videos:
+            yt_id = asset_map.get(v.get("asset", ""))
+            if not yt_id:
+                continue
+            if yt_id not in result:
+                result[yt_id] = {"impressions": 0, "cost_micros": 0}
+            result[yt_id]["impressions"] += impressions
+            result[yt_id]["cost_micros"] += cost_micros
+
+    log.info(f"google_ads: métricas encontradas para {len(result)} vídeos YouTube")
+    return result
+
+
 def get_video_paid_metrics(
     video_id: str,
     customer_id: str,
@@ -195,31 +281,15 @@ def get_video_paid_metrics(
     Retorna: {"reach_pagado": int, "inversion_pagada": float}
     Los costMicros se convierten a EUR (o la divisa de la cuenta).
     """
-    query = f"""
-        SELECT
-            metrics.impressions,
-            metrics.cost_micros,
-            ad_group_ad.ad.video_ad.in_stream.video.resource_name
-        FROM ad_group_ad
-        WHERE ad_group_ad.ad.video_ad.in_stream.video.resource_name
-              LIKE '%{video_id}%'
-        AND segments.date DURING ALL_TIME
-    """
     try:
-        data = _gaql_search(customer_id, developer_token, access_token, query, db=db, medio_id=medio_id)
-        results = data.get("results", [])
-        if not results:
-            return {"reach_pagado": 0, "inversion_pagada": 0.0}
-        total_impressions = sum(
-            int(r.get("metrics", {}).get("impressions", 0) or 0)
-            for r in results
+        metrics_map = _fetch_video_metrics_map(
+            customer_id, developer_token, access_token, db=db, medio_id=medio_id,
         )
-        total_cost_micros = sum(
-            int(r.get("metrics", {}).get("costMicros", 0) or 0)
-            for r in results
-        )
-        inversion = round(total_cost_micros / 1_000_000, 2)
-        return {"reach_pagado": total_impressions, "inversion_pagada": inversion}
+        m = metrics_map.get(video_id, {})
+        return {
+            "reach_pagado": m.get("impressions", 0),
+            "inversion_pagada": round(m.get("cost_micros", 0) / 1_000_000, 2),
+        }
     except Exception as ex:
         log.debug(f"google_ads: sin datos para vídeo {video_id}: {ex}")
         return {"reach_pagado": 0, "inversion_pagada": 0.0}
@@ -265,20 +335,28 @@ def sync_paid_metrics(db, medio) -> int:
         log.info(f"[{medio.slug}] google_ads: sin vídeos YouTube 2026+ para sincronizar")
         return 0
 
+    # Una sola llamada a la API para obtener todas las métricas de una vez
+    metrics_map = _fetch_video_metrics_map(
+        customer_id, developer_token, access_token, db=db, medio_id=medio.id,
+    )
+    if not metrics_map:
+        log.info(f"[{medio.slug}] google_ads: no se encontraron métricas pagadas")
+        return 0
+
     actualizadas = 0
     for pub in pubs:
-        metrics = get_video_paid_metrics(
-            pub.id_externo, customer_id, developer_token, access_token,
-            db=db, medio_id=medio.id,
-        )
-        if metrics["reach_pagado"] > 0 or metrics["inversion_pagada"] > 0:
-            pub.reach_pagado = metrics["reach_pagado"]
-            pub.inversion_pagada = Decimal(str(metrics["inversion_pagada"]))
+        m = metrics_map.get(pub.id_externo)
+        if not m:
+            continue
+        impressions = m["impressions"]
+        inversion = round(m["cost_micros"] / 1_000_000, 2)
+        if impressions > 0 or inversion > 0:
+            pub.reach_pagado = impressions
+            pub.inversion_pagada = Decimal(str(inversion))
             actualizadas += 1
             log.info(
                 f"[{medio.slug}] Video {pub.id_externo} ({pub.canal.value}): "
-                f"reach_pagado={metrics['reach_pagado']:,}, "
-                f"inversion={metrics['inversion_pagada']:.2f}€"
+                f"reach_pagado={impressions:,}, inversion={inversion:.2f}€"
             )
 
     if actualizadas:
