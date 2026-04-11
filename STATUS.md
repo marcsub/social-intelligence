@@ -1,6 +1,6 @@
 # Social Intelligence System — STATUS
 
-> Última actualización: 2026-04-09 — datos reales de producción
+> Última actualización: 2026-04-11 — v0.8
 
 ---
 
@@ -50,6 +50,9 @@ campaña y notificaciones automáticas a cada marca cliente.
 | Facebook Page ID | `1668731220040575` |
 | Instagram Account ID | `17841402263658371` |
 | GA4 Property ID | `373727530` |
+| **Google Ads customer_id** | `4405944785` (cuenta "Mal de Altura") |
+| **Google Ads developer_token** | cifrado en DB `canal=google_ads`, `clave=developer_token` |
+| **Google Ads OAuth** | `access_token` + `refresh_token` en DB `canal=google_ads` |
 
 ### Configuración Apache (mod_proxy)
 
@@ -90,6 +93,23 @@ campaña y notificaciones automáticas a cada marca cliente.
 | slug | Nombre | URL web | RSS/Sitemap | Activo |
 |------|--------|---------|-------------|--------|
 | `roadrunningreview` | ROADRUNNINGReview | https://www.roadrunningreview.com | SiteMapTrailES0.xml | ✅ |
+
+---
+
+## APIs de Ads — estado promoción pagada
+
+| Canal | Estado | Cuenta | Datos |
+|-------|--------|--------|-------|
+| **Google Ads** | ✅ conectado | Mal de Altura (4405944785) | 7 vídeos con `reach_pagado` + `inversion_pagada` |
+| **Meta Ads** | ⏳ pendiente | — | Requiere reactivar cuenta publicitaria + permiso `ads_read` |
+
+**Google Ads — configuración:**
+- `developer_token`: cifrado en DB (`canal=google_ads`, `clave=developer_token`)
+- `customer_id`: `4405944785`
+- `access_token` + `refresh_token`: OAuth en DB (`canal=google_ads`)
+- Sync automático: **martes 03:00 UTC**
+- Histórico: desde `2026-01-01`
+- Script manual: `python scripts/sync_paid_metrics.py --slug roadrunningreview --canal google --fecha-desde 2026-01-01`
 
 ---
 
@@ -160,6 +180,8 @@ campaña y notificaciones automáticas a cada marca cliente.
 | `agents/instagram_stories_agent.py` | Captura Stories + imagen; `thumbnail_url` para VIDEO; retry si `captura_url=NULL` | ✅ |
 | `agents/facebook_agent.py` | Graph API v25.0; page token OAuth permanente; `post_impressions_unique`; skip >24m | ✅ |
 | `agents/threads_agent.py` | Threads API; App ID 1389357836567753; User ID 26958667087052227 | ✅ |
+| `agents/meta_ads_agent.py` | Meta Marketing API v25; fallo silencioso si falta permiso `ads_read` | 🆕 |
+| `agents/google_ads_agent.py` | Google Ads API v20; GAQL dual (FROM asset + FROM ad_group_ad); VIDEO_RESPONSIVE_AD; rango fechas explícito; refresh automático access_token | 🆕 |
 | `utils/semanas.py` | Helpers ISO week: `get_semana_iso`, `get_rango_semana`, `semanas_entre` | ✅ |
 
 ### Frontend — `frontend/src/App.jsx`
@@ -168,9 +190,9 @@ campaña y notificaciones automáticas a cada marca cliente.
 |-------|-------------|
 | **Login** | JWT; `application/x-www-form-urlencoded`; token en localStorage; redirección automática si ya autenticado |
 | **Panel medios** | CRUD medios, marcas, agencias; gestión tokens cifrados por canal |
-| **Publicaciones** | Tabla filtrable por canal/marca/estado/fecha; selección múltiple Shift+click; bulk-refresh, asignar marca, marcar revisado; badge `estado_marca` |
+| **Publicaciones** | Tabla filtrable por canal/marca/estado/fecha; selección múltiple Shift+click; bulk-refresh, asignar marca, marcar revisado; badge `estado_marca`; badge **Patrocinado** (naranja) si `inversion_pagada > 0`; columnas `reach_pagado`/`inversion_pagada` de solo lectura; totales en cabecera (reach orgánico, reach pagado, inversión total) |
 | **Analytics — Resumen** | KPIs período + gráfica mensual reach por canal + top 10 marcas + gráfica semanal ISO (fallback reach acumulado si `reach_diff=0`) |
-| **Analytics — Dashboard marca** | KPIs por marca + reach por canal (bar) + evolución mensual + últimas 5 pubs + gráfica semanal |
+| **Analytics — Dashboard marca** | KPIs por marca (incl. inversión total + reach pagado) + reach por canal con barras apiladas orgánico/pagado (naranja) + evolución mensual + últimas 5 pubs + gráfica semanal |
 | **Analytics — Comparar marcas** | Comparativa lado a lado de dos marcas |
 | **Analytics — Por canal** | Filtro por canal con gráfica semanal específica |
 
@@ -198,6 +220,8 @@ campaña y notificaciones automáticas a cada marca cliente.
 | `migrate_add_sin_datos.py` | ALTER TABLE MySQL: añade `sin_datos` al ENUM | `python scripts/migrate_add_sin_datos.py` *(1 vez)* | ✅ |
 | `migrate_add_youtube_short.py` | Migración DB: añade canal `youtube_short` | `python scripts/migrate_add_youtube_short.py` *(1 vez)* | 🆕 |
 | `migrate_add_texto.py` | Migración DB: añade campo `texto` a publicaciones | `python scripts/migrate_add_texto.py` *(1 vez)* | 🆕 |
+| `sync_paid_metrics.py` | Sync métricas pagadas desde Meta Ads y/o Google Ads | `python scripts/sync_paid_metrics.py --slug roadrunningreview --canal [meta\|google\|all] --fecha-desde YYYY-MM-DD` | 🆕 |
+| `authorize_google_ads.py` | OAuth flow Google Ads → `access_token`+`refresh_token` en DB; HTTPServer en :8001 | `python scripts/authorize_google_ads.py --slug roadrunningreview` | 🆕 |
 | `validate_all.py` | Suite validación completa: tokens, DB, API, métricas | `python scripts/validate_all.py --slug roadrunningreview` | ✅ |
 | `validate_semanal.py` | Valida histórico semanal | `python scripts/validate_semanal.py --slug roadrunningreview` | 🆕 |
 | `check_instagram_errors.py` | Revisar errores Instagram en DB | `python scripts/check_instagram_errors.py --slug roadrunningreview` | 🆕 |
@@ -213,6 +237,11 @@ campaña y notificaciones automáticas a cada marca cliente.
 
 | Fix | Descripción |
 |-----|-------------|
+| **Google Ads GAQL query** | Campo `video_ad.in_stream.video.resource_name` inexistente para `VIDEO_RESPONSIVE_AD` → query dual: `FROM asset` (asset_rn→yt_id) + `FROM ad_group_ad` con `video_responsive_ad.videos` |
+| **Google Ads GAQL date range** | `LAST_365_DAYS` y `THIS_YEAR` inválidos en GAQL v20 → rango explícito `'{year}-01-01' AND '{year}-12-31'` calculado dinámicamente |
+| **Google Ads GAQL WHERE** | `metrics.impressions > 0` inválido en WHERE de GAQL → filtrado en Python post-query |
+| **authorize_google_ads.py URI** | Redirect URI OOB (`urn:ietf:wg:oauth:2.0:oob`) deprecada → `HTTPServer` local en `:8001` |
+| **authorize_google_ads.py token** | `get_tok()` llamada sin argumento `jwt_secret` → corregido |
 | `_parse_ts()` | Timestamps Meta sin dos puntos en el offset de zona horaria (Python 3.10 compat) |
 | Stories inserción | `detect_and_update()` inserta Stories nuevas además de actualizar las existentes |
 | Stories vídeo | Usa `thumbnail_url` en lugar de `media_url` para Stories de tipo VIDEO |
@@ -228,7 +257,7 @@ campaña y notificaciones automáticas a cada marca cliente.
 
 ---
 
-## Triggers automáticos (APScheduler) — 10 jobs activos
+## Triggers automáticos (APScheduler) — 11 jobs activos
 
 | Job | Trigger | Descripción |
 |-----|---------|-------------|
@@ -241,6 +270,7 @@ campaña y notificaciones automáticas a cada marca cliente.
 | Instagram snapshot semanal | Cron **lunes 01:00 UTC** | Snapshot semanal Instagram posts/reels/stories |
 | Facebook snapshot semanal | Cron **lunes 01:30 UTC** | Snapshot semanal Facebook |
 | Threads snapshot semanal | Cron **lunes 02:00 UTC** | Snapshot semanal Threads |
+| **Sync métricas pagadas** | Cron **martes 03:00 UTC** | `google_ads_agent.sync_paid_metrics` + `meta_ads_agent.sync_paid_metrics` |
 | YouTube Shorts actualización métricas | Cada **48 horas** | `update_metrics()` para Shorts recientes |
 
 Horarios diarios configurables en `config_medio.hora_trigger_diario` y `hora_trigger_stories`.
@@ -291,23 +321,22 @@ Horarios diarios configurables en `config_medio.hora_trigger_diario` y `hora_tri
 | v0.4 | Frontend publicaciones selección múltiple + Analytics Chart.js |
 | v0.5 | Histórico semanal métricas + backfill GA4 |
 | v0.6 | Fix Brand ID Agent substring→prefix · fix timezone naive/aware · Facebook v21→v25 + `_resolve_page_token` · `estado_marca` · `sin_datos` enum · `authorize_facebook.py` · `validate_all.py` |
-| **v0.7** *(actual)* | YouTube Shorts Agent · Threads Agent · 10 jobs APScheduler · Apache mod_proxy producción · fix Stories inserción/vídeo/retry · fix timestamps Meta · campo `texto` en DB · fix web fechas datePublished · fix Shorts duplicados |
+| v0.7 | YouTube Shorts Agent · Threads Agent · 10 jobs APScheduler · Apache mod_proxy producción · fix Stories inserción/vídeo/retry · fix timestamps Meta · campo `texto` en DB · fix web fechas datePublished · fix Shorts duplicados |
+| **v0.8** *(actual)* | Meta Ads Agent + Google Ads Agent · columnas `reach_pagado`/`inversion_pagada` en DB · badge Patrocinado panel · barras apiladas orgánico+pagado en Analytics · `sync_paid_metrics.py --fecha-desde` · `authorize_google_ads.py` · 11 jobs APScheduler · fix GAQL VIDEO_RESPONSIVE_AD + rango fechas + WHERE metrics |
 
 ### Pendientes
 
 **Prioridad Alta**
 - Generador PDF por marca/año (`reportlab` o `weasyprint`) — portada, tabla pubs, totales canal, capturas
+- X (Twitter) Agent — X API v2 Bearer Token: `impressions`, `likes`, `retweets`, `replies`
 - Renovación automática page token Facebook (~60 días) + alerta 7 días antes
+- Meta Ads: reactivar cuenta publicitaria + añadir permiso `ads_read` en token sistema
 
 **Prioridad Media**
 - Notificación diaria email a cada marca/agencia via SMTP
+- TikTok Agent — pendiente aprobación Research API
 
-**Fase 3 — X (Twitter)**
-- X Agent: X API v2 Bearer Token — `impressions`, `likes`, `retweets`, `replies`
-- Registrar en orchestrator; añadir `CanalEnum.x`
-
-**Fase 3 — TikTok**
-- TikTok Agent: Research API (pendiente aprobación) — `plays`, `likes`, `shares`
+**Fase 5 — Avanzado**
 
 **Fase 5 — Avanzado**
 - YouTube Scraper canales ajenos (reach vídeos de marcas externas)
@@ -449,8 +478,9 @@ python scripts/fix_facebook_reach.py --slug roadrunningreview
 | # | Tarea | Prioridad | Estado |
 |---|-------|-----------|--------|
 | 1 | Generador PDF informes por marca/año | 🔴 Alta | ⬜ siguiente |
-| 2 | Renovación automática page token Facebook | 🔴 Alta | ⬜ siguiente |
-| 3 | Notificación diaria email a cada marca | 🟡 Media | ⬜ siguiente |
-| 4 | X (Twitter) Agent — Bearer Token disponible | 🟡 Media | ⬜ siguiente |
-| 5 | TikTok Agent — pendiente aprobación API | 🔵 Baja | ⬜ bloqueado |
-| 6 | Brand Vision Agent — identificación marca por imagen con Claude API | 🔵 Baja | ⬜ siguiente |
+| 2 | X (Twitter) Agent — Bearer Token disponible | 🔴 Alta | ⬜ siguiente |
+| 3 | Renovación automática page token Facebook | 🔴 Alta | ⬜ siguiente |
+| 4 | Meta Ads: reactivar cuenta + permiso `ads_read` | 🔴 Alta | ⬜ pendiente externo |
+| 5 | Notificación diaria email a cada marca | 🟡 Media | ⬜ siguiente |
+| 6 | TikTok Agent — pendiente aprobación API | 🔵 Baja | ⬜ bloqueado |
+| 7 | Brand Vision Agent — identificación marca por imagen con Claude API | 🔵 Baja | ⬜ siguiente |
