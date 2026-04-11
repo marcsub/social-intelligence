@@ -222,13 +222,14 @@ def _fetch_video_metrics_map(
 
     log.info(f"google_ads: {len(asset_map)} assets YouTube encontrados")
 
-    # 2. Métricas por ad_group_ad (VIDEO_RESPONSIVE_AD) con sus asset de vídeo
+    # 2. Métricas por ad_group_ad VIDEO_RESPONSIVE con sus asset de vídeo
+    # Nota: GAQL no permite filtrar métricas numéricas en WHERE — se filtra en Python
     metrics_q = (
         "SELECT ad_group_ad.ad.video_responsive_ad.videos, "
         "metrics.impressions, metrics.cost_micros "
         "FROM ad_group_ad "
         "WHERE segments.date DURING LAST_365_DAYS "
-        "AND metrics.impressions > 0 "
+        "AND ad_group_ad.ad.type = VIDEO_RESPONSIVE_AD "
         "LIMIT 1000"
     )
     try:
