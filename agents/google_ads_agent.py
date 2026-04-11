@@ -228,7 +228,7 @@ def _fetch_video_metrics_map(
         "SELECT ad_group_ad.ad.video_responsive_ad.videos, "
         "metrics.impressions, metrics.cost_micros "
         "FROM ad_group_ad "
-        "WHERE segments.date DURING LAST_365_DAYS "
+        "WHERE segments.date DURING THIS_YEAR "
         "AND ad_group_ad.ad.type = VIDEO_RESPONSIVE_AD "
         "LIMIT 1000"
     )
