@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Chart, registerables } from "chart.js";
 Chart.register(...registerables);
 
@@ -590,7 +590,6 @@ function StoryPopover({ item, x, y, imgUrl, onClose }) {
 // ── Publicaciones page ────────────────────────────────────────────────────────
 const PER_PAGE = 50;
 const CANALES_OPTS = [
-  ["","Todos los canales"],
   ["web","Web"],
   ["instagram_post","Instagram"],
   ["instagram_story","Stories"],
@@ -599,6 +598,7 @@ const CANALES_OPTS = [
   ["youtube","YouTube"],
   ["youtube_short","Shorts"],
   ["threads","Threads"],
+  ["tiktok","TikTok"],
 ];
 const ESTADOS_OPTS = [
   ["","Todos los estados"],
@@ -870,10 +870,12 @@ function MultiMarcaSelector({ value, onChange, marcas }) {
 
 function PublicacionesPage({ slug, api }) {
   const [marcas, setMarcas] = useState([]);
-  const initFiltros = { marca_id: "", canal: "", estado: "", fecha_desde: "", fecha_hasta: "" };
+  const initFiltros = { marca_id: "", canales: [], estado: "", fecha_desde: "", fecha_hasta: "" };
   const [filtros, setFiltros] = useState(initFiltros);
   const [applied, setApplied] = useState(initFiltros);
   const [page, setPage] = useState(1);
+  // sortConfig: [{col, dir}] — dir: "asc" | "desc"
+  const [sortConfig, setSortConfig] = useState([]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -925,12 +927,14 @@ function PublicacionesPage({ slug, api }) {
     try {
       const p = new URLSearchParams({ page, per_page: PER_PAGE });
       if (applied.marca_id) p.set("marca_id", applied.marca_id);
-      if (applied.canal === "reel") {
-        p.set("tipo", "reel");
-      } else if (applied.canal) {
-        p.set("canal", applied.canal);
+      // Multicanal: si hay selección, separar reels (van por tipo) del resto
+      if (applied.canales?.length) {
+        const sinReel = applied.canales.filter(c => c !== "reel");
+        const conReel = applied.canales.includes("reel");
+        if (sinReel.length) p.set("canal", sinReel.join(","));
+        if (conReel) p.set("tipo", "reel");
       }
-      if (applied.estado)   p.set("estado", applied.estado);
+      if (applied.estado)      p.set("estado", applied.estado);
       if (applied.fecha_desde) p.set("fecha_desde", applied.fecha_desde);
       if (applied.fecha_hasta) p.set("fecha_hasta", applied.fecha_hasta);
       const d = await api("GET", `/medios/${slug}/publicaciones?${p}`);
@@ -944,7 +948,41 @@ function PublicacionesPage({ slug, api }) {
 
   useEffect(() => { loadPubs(); }, [loadPubs]);
 
-  const handleBuscar = () => { setPage(1); setApplied({ ...filtros }); };
+  const handleBuscar = () => { setPage(1); setApplied({ ...filtros }); setSortConfig([]); };
+
+  // Ordenación multicolumna: cicla none→desc→asc→none
+  const handleSort = (col) => {
+    setSortConfig(prev => {
+      const idx = prev.findIndex(s => s.col === col);
+      if (idx === -1) return [...prev, { col, dir: "desc" }];
+      const cur = prev[idx];
+      if (cur.dir === "desc") {
+        const next = [...prev]; next[idx] = { col, dir: "asc" }; return next;
+      }
+      // asc → quitar
+      return prev.filter(s => s.col !== col);
+    });
+  };
+
+  // Items ordenados según sortConfig (orden client-side sobre la página actual)
+  const sortedItems = useMemo(() => {
+    if (!data?.items || sortConfig.length === 0) return data?.items ?? [];
+    return [...data.items].sort((a, b) => {
+      for (const { col, dir } of sortConfig) {
+        const mult = dir === "asc" ? 1 : -1;
+        let va = a[col], vb = b[col];
+        if (va == null) va = dir === "asc" ? Infinity : -Infinity;
+        if (vb == null) vb = dir === "asc" ? Infinity : -Infinity;
+        if (typeof va === "string") {
+          const cmp = va.localeCompare(vb, "es"); if (cmp !== 0) return cmp * mult;
+        } else {
+          if (va < vb) return -1 * mult;
+          if (va > vb) return  1 * mult;
+        }
+      }
+      return 0;
+    });
+  }, [data?.items, sortConfig]);
 
   const toggleSelect = (id) => {
     setSelected(prev => {
@@ -1042,7 +1080,7 @@ function PublicacionesPage({ slug, api }) {
     finally { setRowSaving(prev => ({ ...prev, [item.id]: false })); }
   };
 
-  const items = data?.items || [];
+  const items = sortedItems;
   const allSelected = items.length > 0 && selected.size === items.length;
   const inicio = data ? (page - 1) * PER_PAGE + 1 : 0;
   const fin    = data ? Math.min(page * PER_PAGE, data.total) : 0;
@@ -1072,11 +1110,34 @@ function PublicacionesPage({ slug, api }) {
               {marcas.map(m => <option key={m.id} value={m.id}>{m.nombre_canonico}</option>)}
             </select>
           </div>
-          <div>
+          <div style={{ position:"relative" }}>
             <div style={{ fontSize:11, color:"#888", marginBottom:4 }}>Canal</div>
-            <select style={s.select} value={filtros.canal} onChange={e => setFiltros({...filtros, canal: e.target.value})}>
-              {CANALES_OPTS.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+            <select
+              multiple
+              style={{ ...s.select, height: 32, minWidth: 140, cursor:"pointer" }}
+              value={filtros.canales}
+              onChange={e => {
+                const sel = Array.from(e.target.selectedOptions).map(o => o.value);
+                setFiltros({ ...filtros, canales: sel });
+              }}
+              size={1}
+              title={filtros.canales.length ? filtros.canales.map(c => CANALES_OPTS.find(([v])=>v===c)?.[1]||c).join(", ") : "Todos los canales"}
+            >
+              {CANALES_OPTS.map(([v,l]) => (
+                <option key={v} value={v} style={{ padding:"2px 6px" }}>{filtros.canales.includes(v) ? "✓ "+l : "\u00a0\u00a0 "+l}</option>
+              ))}
             </select>
+            {filtros.canales.length > 0 && (
+              <span style={{ position:"absolute", top:18, right:6, background:"#185FA5", color:"#fff",
+                borderRadius:10, fontSize:10, padding:"1px 5px", pointerEvents:"none" }}>
+                {filtros.canales.length}
+              </span>
+            )}
+            {filtros.canales.length === 0 && (
+              <div style={{ position:"absolute", top:22, left:8, fontSize:13, color:"#555", pointerEvents:"none" }}>
+                Todos los canales
+              </div>
+            )}
           </div>
           <div>
             <div style={{ fontSize:11, color:"#888", marginBottom:4 }}>Estado</div>
@@ -1174,16 +1235,42 @@ function PublicacionesPage({ slug, api }) {
                   <th style={{...s.th, width:32}}>
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} />
                   </th>
-                  <th style={s.th}>Fecha</th>
-                  <th style={s.th}>Canal</th>
-                  <th style={s.th}>Contenido</th>
-                  <th style={{...s.th, minWidth:160}}>Marca</th>
-                  <th style={{...s.th, textAlign:"right"}}>Reach</th>
-                  <th style={{...s.th, textAlign:"right"}}>Likes</th>
-                  <th style={{...s.th, textAlign:"right", minWidth:90}}>Inversión €</th>
-                  <th style={{...s.th, textAlign:"right", minWidth:90}}>Reach pag.</th>
-                  <th style={s.th}>Métricas</th>
-                  <th style={s.th}>Acción</th>
+                  {[
+                    { col:"fecha_publicacion", label:"Fecha",       align:"left"  },
+                    { col:"canal",             label:"Canal",       align:"left"  },
+                    { col:null,                label:"Contenido",   align:"left"  },
+                    { col:null,                label:"Marca",       align:"left", minWidth:160 },
+                    { col:"reach",             label:"Reach",       align:"right" },
+                    { col:"likes",             label:"Likes",       align:"right" },
+                    { col:"inversion_pagada",  label:"Inversión €", align:"right", minWidth:90 },
+                    { col:"reach_pagado",      label:"Reach pag.",  align:"right", minWidth:90 },
+                    { col:"estado_metricas",   label:"Métricas",   align:"left"  },
+                    { col:null,                label:"Acción",      align:"left"  },
+                  ].map(({ col, label, align, minWidth }) => {
+                    const si = col ? sortConfig.findIndex(s => s.col === col) : -1;
+                    const sc = si >= 0 ? sortConfig[si] : null;
+                    const sortable = !!col;
+                    return (
+                      <th key={label}
+                        style={{ ...s.th, textAlign: align, minWidth, cursor: sortable ? "pointer" : "default",
+                          userSelect: "none", whiteSpace:"nowrap",
+                          background: sc ? "#EBF4FF" : "#fafafa" }}
+                        onClick={sortable ? () => handleSort(col) : undefined}
+                        title={sortable ? "Haz clic para ordenar" : undefined}
+                      >
+                        {label}
+                        {sc && (
+                          <span style={{ marginLeft:5, fontSize:10, color:"#185FA5", fontWeight:700 }}>
+                            {sc.dir === "desc" ? "▼" : "▲"}
+                            {sortConfig.length > 1 && <sup style={{ fontSize:9 }}>{si+1}</sup>}
+                          </span>
+                        )}
+                        {!sc && sortable && (
+                          <span style={{ marginLeft:4, fontSize:10, color:"#ccc" }}>⇅</span>
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>

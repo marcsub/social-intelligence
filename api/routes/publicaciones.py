@@ -211,13 +211,19 @@ def list_publicaciones(
         # Reels: canal instagram_post con tipo reel
         q = q.filter(Publicacion.canal == CanalEnum.instagram_post, Publicacion.tipo == TipoEnum.reel)
     elif canal:
-        try:
-            q = q.filter(Publicacion.canal == CanalEnum(canal))
-            # Al filtrar por instagram_post sin tipo explícito, excluir reels
-            if canal == "instagram_post":
+        # Soporta múltiples canales separados por coma: "instagram_post,facebook,tiktok"
+        canales_list = [c.strip() for c in canal.split(",") if c.strip()]
+        canales_enum = []
+        for c in canales_list:
+            try:
+                canales_enum.append(CanalEnum(c))
+            except ValueError:
+                pass
+        if canales_enum:
+            q = q.filter(Publicacion.canal.in_(canales_enum))
+            # Si instagram_post está en la lista sin tipo explícito, excluir reels
+            if CanalEnum.instagram_post in canales_enum and tipo != "reel":
                 q = q.filter(Publicacion.tipo != TipoEnum.reel)
-        except ValueError:
-            pass
     if estado:
         try:
             q = q.filter(Publicacion.estado_metricas == EstadoMetricasEnum(estado))
