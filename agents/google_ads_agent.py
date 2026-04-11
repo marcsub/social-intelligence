@@ -224,11 +224,14 @@ def _fetch_video_metrics_map(
 
     # 2. Métricas por ad_group_ad VIDEO_RESPONSIVE con sus asset de vídeo
     # Nota: GAQL no permite filtrar métricas numéricas en WHERE — se filtra en Python
+    # GAQL exige dos bounds en el rango de fecha; no acepta THIS_YEAR ni LAST_365_DAYS
+    year = datetime.now().year
     metrics_q = (
         "SELECT ad_group_ad.ad.video_responsive_ad.videos, "
         "metrics.impressions, metrics.cost_micros "
         "FROM ad_group_ad "
-        "WHERE segments.date >= '2026-01-01' "
+        f"WHERE segments.date >= '{year}-01-01' "
+        f"AND segments.date <= '{year}-12-31' "
         "AND ad_group_ad.ad.type = VIDEO_RESPONSIVE_AD "
         "LIMIT 1000"
     )
