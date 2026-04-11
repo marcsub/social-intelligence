@@ -25,7 +25,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 log = logging.getLogger(__name__)
 
@@ -187,12 +187,17 @@ def _fetch_video_metrics_map(
     access_token: str,
     db=None,
     medio_id: int = None,
+    fecha_desde: date | None = None,
+    fecha_hasta: date | None = None,
 ) -> dict:
     """
     Construye un mapa {youtube_video_id: {"impressions": int, "cost_micros": int}}
     usando dos queries GAQL:
       1. assets YOUTUBE_VIDEO  → asset_resource_name → youtube_video_id
       2. ad_group_ad VIDEO_RESPONSIVE_AD → asset_resource_name + métricas
+
+    fecha_desde / fecha_hasta: rango de fechas GAQL (GAQL exige ambos bounds).
+    Por defecto: año en curso completo.
     """
     # 1. Mapa asset_resource_name → youtube_video_id
     asset_q = (
@@ -225,13 +230,14 @@ def _fetch_video_metrics_map(
     # 2. Métricas por ad_group_ad VIDEO_RESPONSIVE con sus asset de vídeo
     # Nota: GAQL no permite filtrar métricas numéricas en WHERE — se filtra en Python
     # GAQL exige dos bounds en el rango de fecha; no acepta THIS_YEAR ni LAST_365_DAYS
-    year = datetime.now().year
+    d_desde = fecha_desde or date(datetime.now().year, 1, 1)
+    d_hasta = fecha_hasta or date.today()
     metrics_q = (
         "SELECT ad_group_ad.ad.video_responsive_ad.videos, "
         "metrics.impressions, metrics.cost_micros "
         "FROM ad_group_ad "
-        f"WHERE segments.date >= '{year}-01-01' "
-        f"AND segments.date <= '{year}-12-31' "
+        f"WHERE segments.date >= '{d_desde.strftime('%Y-%m-%d')}' "
+        f"AND segments.date <= '{d_hasta.strftime('%Y-%m-%d')}' "
         "AND ad_group_ad.ad.type = VIDEO_RESPONSIVE_AD "
         "LIMIT 1000"
     )
@@ -301,12 +307,15 @@ def get_video_paid_metrics(
 
 # ── Sync principal ────────────────────────────────────────────────────────────
 
-def sync_paid_metrics(db, medio) -> int:
+def sync_paid_metrics(db, medio, fecha_desde: date | None = None) -> int:
     """
-    Sincroniza métricas pagadas para vídeos YouTube del medio (2026+).
+    Sincroniza métricas pagadas para vídeos YouTube del medio.
 
     - Si las credenciales no están configuradas: loguea instrucciones y retorna 0.
     - Si están configuradas: actualiza reach_pagado e inversion_pagada.
+
+    fecha_desde: inicio del rango de búsqueda en Google Ads (y filtro de publicaciones).
+                 Por defecto: 2026-01-01.
 
     Retorna número de publicaciones actualizadas.
     """
@@ -323,25 +332,28 @@ def sync_paid_metrics(db, medio) -> int:
         )
         return 0
 
-    inicio_2026 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    d_desde = fecha_desde or date(2026, 1, 1)
+    filtro_fecha = datetime(d_desde.year, d_desde.month, d_desde.day, tzinfo=timezone.utc)
     pubs = (
         db.query(Publicacion)
         .filter(
             Publicacion.medio_id == medio.id,
             Publicacion.canal.in_([CanalEnum.youtube, CanalEnum.youtube_short]),
-            Publicacion.fecha_publicacion >= inicio_2026,
+            Publicacion.fecha_publicacion >= filtro_fecha,
             Publicacion.id_externo.isnot(None),
         )
         .all()
     )
 
     if not pubs:
-        log.info(f"[{medio.slug}] google_ads: sin vídeos YouTube 2026+ para sincronizar")
+        log.info(f"[{medio.slug}] google_ads: sin vídeos YouTube desde {d_desde} para sincronizar")
         return 0
 
     # Una sola llamada a la API para obtener todas las métricas de una vez
     metrics_map = _fetch_video_metrics_map(
-        customer_id, developer_token, access_token, db=db, medio_id=medio.id,
+        customer_id, developer_token, access_token,
+        db=db, medio_id=medio.id,
+        fecha_desde=d_desde,
     )
     if not metrics_map:
         log.info(f"[{medio.slug}] google_ads: no se encontraron métricas pagadas")

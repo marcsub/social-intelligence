@@ -20,6 +20,7 @@ import sys
 import os
 import logging
 import argparse
+from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -38,9 +39,19 @@ CANALES = ["all", "meta", "google"]
 
 def main():
     parser = argparse.ArgumentParser(description="Sync métricas pagadas desde APIs de Ads")
-    parser.add_argument("--slug",  required=True, help="Slug del medio")
-    parser.add_argument("--canal", default="all", choices=CANALES)
+    parser.add_argument("--slug",        required=True, help="Slug del medio")
+    parser.add_argument("--canal",       default="all", choices=CANALES)
+    parser.add_argument("--fecha-desde", default=None,
+                        help="Fecha inicio rango Google Ads (YYYY-MM-DD). Por defecto: 2026-01-01")
     args = parser.parse_args()
+
+    fecha_desde = None
+    if args.fecha_desde:
+        try:
+            fecha_desde = date.fromisoformat(args.fecha_desde)
+        except ValueError:
+            log.error(f"Formato de fecha inválido: '{args.fecha_desde}'. Usar YYYY-MM-DD.")
+            sys.exit(1)
 
     settings = get_settings()
     engine = create_db_engine(settings.db_url)
@@ -73,7 +84,7 @@ def main():
                 if not ok:
                     log.warning(f"Google Ads no disponible: {msg}")
                 else:
-                    n = google_ads_agent.sync_paid_metrics(db, medio)
+                    n = google_ads_agent.sync_paid_metrics(db, medio, fecha_desde=fecha_desde)
                     log.info(f"Google Ads completado: {n} vídeos actualizados")
                     total += n
             except Exception as ex:
