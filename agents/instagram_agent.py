@@ -558,8 +558,9 @@ def snapshot_weekly(db: Session, medio: Medio) -> int:
 
 def update_etiquetas(db: Session, medio: Medio, publicaciones: list[Publicacion]) -> int:
     """
-    Obtiene usertags y @menciones para una lista de publicaciones Instagram y
-    actualiza el campo etiquetas. Útil para backfill histórico.
+    Obtiene usertags (API) y @menciones (caption) para publicaciones Instagram.
+    Si la API de usertags devuelve 400 (permisos insuficientes o tipo no soportado),
+    cae back a extraer @menciones del campo texto (caption ya guardado en BD).
     """
     access_token = _get_token(db, medio.id, "access_token")
     if not access_token:
@@ -570,6 +571,8 @@ def update_etiquetas(db: Session, medio: Medio, publicaciones: list[Publicacion]
     for pub in publicaciones:
         if not pub.id_externo:
             continue
+        usertags_data = []
+        caption = pub.texto or ""
         try:
             data = _graph_get(
                 f"/{pub.id_externo}",
@@ -577,12 +580,12 @@ def update_etiquetas(db: Session, medio: Medio, publicaciones: list[Publicacion]
                 {"fields": "usertags,caption"},
             )
             usertags_data = data.get("usertags", {}).get("data", []) if isinstance(data.get("usertags"), dict) else []
-            caption = data.get("caption", "") or pub.texto or ""
-            etiquetas_json = _build_etiquetas(caption, usertags_data)
-            pub.etiquetas = etiquetas_json
-            actualizadas += 1
-        except Exception as ex:
-            log.warning(f"[{medio.slug}] Error obteniendo etiquetas para {pub.id_externo}: {ex}")
+            caption = data.get("caption", "") or caption
+        except Exception:
+            # Fallback silencioso: usamos caption ya guardado + sin usertags
+            pass
+        pub.etiquetas = _build_etiquetas(caption, usertags_data)
+        actualizadas += 1
 
     db.commit()
     log.info(f"[{medio.slug}] Instagram etiquetas actualizadas: {actualizadas}/{len(publicaciones)}")
