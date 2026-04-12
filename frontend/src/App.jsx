@@ -1903,7 +1903,10 @@ function AnalyticsPage({ slug, api }) {
   useEffect(() => {
     if (tab !== "canal") return;
     setLoadingCanal(true);
-    const p = new URLSearchParams({ canal });
+    // Reels se guardan como canal=instagram_post + tipo=reel; no hay canal "reel"
+    const p = canal === "reel"
+      ? new URLSearchParams({ canal: "instagram_post", tipo: "reel" })
+      : new URLSearchParams({ canal });
     if (periodo !== "custom") p.set("periodo", periodo);
     if (fechaDesde) p.set("fecha_desde", fechaDesde);
     if (fechaHasta) p.set("fecha_hasta", fechaHasta);
@@ -2190,22 +2193,28 @@ function AnalyticsPage({ slug, api }) {
           ) : (
             <>
               {/* Evolución del canal */}
-              {canalData.canales[canal] && (
-                <div style={s.chartBox}>
-                  <div style={{ fontSize:14, fontWeight:600, marginBottom:16 }}>
-                    Evolución mensual — <span style={{ color:CANAL_COLORS[canal] }}>{CANAL_LABELS[canal]}</span>
+              {/* Reels se guardan como instagram_post en BD, así que la clave en la respuesta es instagram_post */}
+              {(() => {
+                const canalKey = canal === "reel" ? "instagram_post" : canal;
+                const chartData = canalData.canales[canalKey];
+                if (!chartData) return null;
+                return (
+                  <div style={s.chartBox}>
+                    <div style={{ fontSize:14, fontWeight:600, marginBottom:16 }}>
+                      Evolución mensual — <span style={{ color:CANAL_COLORS[canal] }}>{CANAL_LABELS[canal]}</span>
+                    </div>
+                    <ChartCanvas
+                      type="bar"
+                      data={{
+                        labels: canalData.meses,
+                        datasets: [{ label:"Reach", data:chartData, backgroundColor:CANAL_COLORS[canal], borderRadius:4 }],
+                      }}
+                      options={{ plugins:{ legend:{ display:false } }, scales:{ y:{ ticks:{ callback: v => fmtNum(v) } } } }}
+                      height={260}
+                    />
                   </div>
-                  <ChartCanvas
-                    type="bar"
-                    data={{
-                      labels: canalData.meses,
-                      datasets: [{ label:"Reach", data:canalData.canales[canal], backgroundColor:CANAL_COLORS[canal], borderRadius:4 }],
-                    }}
-                    options={{ plugins:{ legend:{ display:false } }, scales:{ y:{ ticks:{ callback: v => fmtNum(v) } } } }}
-                    height={260}
-                  />
-                </div>
-              )}
+                );
+              })()}
               {/* Top marcas en ese canal */}
               {canalData.top_marcas?.length > 0 && (
                 <div style={s.chartBox}>

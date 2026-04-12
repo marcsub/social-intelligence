@@ -266,7 +266,11 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
             # Métricas iniciales via insights (Reels: permalink /reel/ → usa REEL_METRICS)
             _tipo = _get_tipo(media_type, permalink)
             _mt_for_insights = "REELS" if _tipo == TipoEnum.reel else media_type
-            insights = _get_media_insights(access_token, media_id, _mt_for_insights)
+            try:
+                insights = _get_media_insights(access_token, media_id, _mt_for_insights)
+            except Exception as _ie:
+                log.warning(f"[{medio.slug}] Insights fallaron al detectar {media_id}: {_ie} — se guarda con métricas 0")
+                insights = {"reach": 0, "saved": 0, "shares": 0, "likes": 0, "comments": 0}
 
             pub = Publicacion(
                 medio_id=medio.id,

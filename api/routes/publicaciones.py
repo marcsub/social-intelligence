@@ -540,6 +540,7 @@ def analytics_resumen(
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     canal: Optional[str] = None,
+    tipo: Optional[str] = None,
     db: Session = Depends(get_db),
     _=Auth,
 ):
@@ -554,6 +555,11 @@ def analytics_resumen(
     if canal:
         try:
             base = base.filter(Publicacion.canal == CanalEnum(canal))
+        except ValueError:
+            pass
+    if tipo:
+        try:
+            base = base.filter(Publicacion.tipo == TipoEnum(tipo))
         except ValueError:
             pass
 
