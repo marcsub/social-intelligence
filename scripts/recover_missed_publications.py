@@ -108,14 +108,19 @@ def main():
             reset_checkpoint(db, medio.id, agente_name, fecha_desde)
 
         # 3. Ejecutar detección inmediata para cada agente
+        # Cada agente usa su propia sesión para que un fallo no corrompa las siguientes
         log.info("\n--- Ejecutando detección inmediata ---")
         total_nuevas = 0
         total_actualizadas = 0
+        medio_id = medio.id
 
-        for agente_name in AGENTS:
-            log.info(f"\n[{agente_name}] iniciando...")
+    # Sesión principal ya no se necesita — cada agente abre la suya
+    for agente_name in AGENTS:
+        log.info(f"\n[{agente_name}] iniciando...")
+        with Session() as agent_db:
             try:
-                result = run_agent(db, medio, agente_name, tipo="manual_recovery")
+                agent_medio = agent_db.query(Medio).filter(Medio.id == medio_id).first()
+                result = run_agent(agent_db, agent_medio, agente_name, tipo="manual_recovery")
                 nuevas      = result.get("nuevas", 0)
                 actualizadas = result.get("actualizadas", 0)
                 total_nuevas       += nuevas
@@ -123,12 +128,16 @@ def main():
                 log.info(f"[{agente_name}] ✓ nuevas={nuevas} actualizadas={actualizadas}")
             except Exception as ex:
                 log.error(f"[{agente_name}] ERROR: {ex}")
+                try:
+                    agent_db.rollback()
+                except Exception:
+                    pass
 
-        # 4. Resumen
-        log.info(f"\n=== RESUMEN ===")
-        log.info(f"Total publicaciones nuevas detectadas: {total_nuevas}")
-        log.info(f"Total métricas actualizadas:           {total_actualizadas}")
-        log.info("Recuperación completada.")
+    # 4. Resumen
+    log.info(f"\n=== RESUMEN ===")
+    log.info(f"Total publicaciones nuevas detectadas: {total_nuevas}")
+    log.info(f"Total métricas actualizadas:           {total_actualizadas}")
+    log.info("Recuperación completada.")
 
 
 if __name__ == "__main__":
