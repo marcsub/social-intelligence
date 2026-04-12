@@ -934,12 +934,11 @@ function PublicacionesPage({ slug, api }) {
     try {
       const p = new URLSearchParams({ page, per_page: PER_PAGE });
       if (applied.marca_id) p.set("marca_id", applied.marca_id);
-      // Multicanal: si hay selección, separar reels (van por tipo) del resto
+      // Multicanal: cada canal como param separado (?canal=X&canal=Y)
+      // reel es virtual → se manda como incluir_reels=1 para que el backend haga OR
       if (applied.canales?.length) {
-        const sinReel = applied.canales.filter(c => c !== "reel");
-        const conReel = applied.canales.includes("reel");
-        if (sinReel.length) p.set("canal", sinReel.join(","));
-        if (conReel) p.set("tipo", "reel");
+        applied.canales.filter(c => c !== "reel").forEach(c => p.append("canal", c));
+        if (applied.canales.includes("reel")) p.set("incluir_reels", "1");
       }
       if (applied.estado)       p.set("estado", applied.estado);
       if (applied.fecha_desde)  p.set("fecha_desde", applied.fecha_desde);

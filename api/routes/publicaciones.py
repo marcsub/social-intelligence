@@ -8,7 +8,8 @@ log = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import Optional
+from typing import Optional, List
+from sqlalchemy import or_, and_
 from datetime import date, datetime, timedelta, timezone
 from collections import defaultdict
 from pydantic import BaseModel
@@ -192,12 +193,12 @@ def _marca_analytics(db: Session, medio: Medio, marca_id: int, fd: datetime, fh:
 def list_publicaciones(
     slug: str,
     marca_id: Optional[int] = None,
-    canal: Optional[str] = None,
-    tipo: Optional[str] = None,
+    canal: List[str] = Query(default=[]),
     estado: Optional[str] = None,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     patrocinado: Optional[str] = None,
+    incluir_reels: bool = False,
     page: int = 1,
     per_page: int = 50,
     db: Session = Depends(get_db),
@@ -208,23 +209,33 @@ def list_publicaciones(
 
     if marca_id is not None:
         q = q.filter(Publicacion.marca_id == marca_id)
-    if tipo == "reel":
-        # Reels: canal instagram_post con tipo reel
-        q = q.filter(Publicacion.canal == CanalEnum.instagram_post, Publicacion.tipo == TipoEnum.reel)
-    elif canal:
-        # Soporta múltiples canales separados por coma: "instagram_post,facebook,tiktok"
-        canales_list = [c.strip() for c in canal.split(",") if c.strip()]
+
+    # Filtro multicanal: cada canal llega como param separado (?canal=X&canal=Y)
+    # incluir_reels=1 añade OR (canal=instagram_post AND tipo=reel)
+    if canal or incluir_reels:
         canales_enum = []
-        for c in canales_list:
+        for c in canal:
             try:
                 canales_enum.append(CanalEnum(c))
             except ValueError:
                 pass
+        parts = []
         if canales_enum:
-            q = q.filter(Publicacion.canal.in_(canales_enum))
-            # Si instagram_post está en la lista sin tipo explícito, excluir reels
-            if CanalEnum.instagram_post in canales_enum and tipo != "reel":
-                q = q.filter(Publicacion.tipo != TipoEnum.reel)
+            cond = Publicacion.canal.in_(canales_enum)
+            # Si instagram_post está sin pedir reels explícitamente, excluirlos
+            if CanalEnum.instagram_post in canales_enum and not incluir_reels:
+                cond = and_(cond, or_(
+                    Publicacion.canal != CanalEnum.instagram_post,
+                    Publicacion.tipo != TipoEnum.reel
+                ))
+            parts.append(cond)
+        if incluir_reels:
+            parts.append(and_(
+                Publicacion.canal == CanalEnum.instagram_post,
+                Publicacion.tipo == TipoEnum.reel
+            ))
+        if parts:
+            q = q.filter(or_(*parts) if len(parts) > 1 else parts[0])
     if estado:
         try:
             q = q.filter(Publicacion.estado_metricas == EstadoMetricasEnum(estado))
