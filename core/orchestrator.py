@@ -284,8 +284,19 @@ def setup_scheduler(SessionLocal: sessionmaker):
     Se llama una vez al inicio de la aplicación.
     """
     from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.executors.pool import ThreadPoolExecutor
 
-    scheduler = BackgroundScheduler(timezone="UTC")
+    executors = {"default": ThreadPoolExecutor(max_workers=4)}
+    job_defaults = {
+        "coalesce":          True,   # Si se perdieron N ejecuciones, ejecutar una sola vez
+        "max_instances":     1,      # Nunca ejecutar el mismo job en paralelo
+        "misfire_grace_time": 3600,  # Si el servidor estuvo caído, ejecutar hasta 1h después
+    }
+    scheduler = BackgroundScheduler(
+        timezone="UTC",
+        executors=executors,
+        job_defaults=job_defaults,
+    )
 
     with SessionLocal() as db:
         medios = db.query(Medio).filter(Medio.activo == True).all()
@@ -297,133 +308,279 @@ def setup_scheduler(SessionLocal: sessionmaker):
     return scheduler
 
 
+def _add_job(scheduler, func, trigger, args, job_id, name, **kwargs):
+    """Wrapper seguro para add_job con opciones de robustez."""
+    scheduler.add_job(
+        func=func,
+        trigger=trigger,
+        args=args,
+        id=job_id,
+        name=name,
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+        **kwargs,
+    )
+
+
 def _register_medio_jobs(scheduler, SessionLocal, medio: Medio):
     """Registra los jobs de un medio en el scheduler."""
     from apscheduler.triggers.cron import CronTrigger
 
     config = medio.config
-    hora_diario  = (config.hora_trigger_diario  or "07:00") if config else "07:00"
-    hora_stories = (config.hora_trigger_stories or "06:00") if config else "06:00"
-
+    hora_diario = (config.hora_trigger_diario or "07:00") if config else "07:00"
     h_d, m_d = hora_diario.split(":")
-    h_s, m_s = hora_stories.split(":")
     slug = medio.slug
 
-    # Job diario principal — web, youtube, instagram posts, facebook
-    scheduler.add_job(
-        func=_job_daily,
+    # ── Job horario (todos los canales) — cada hora a :10 ─────────────────────
+    # Detecta nuevas publicaciones + actualiza métricas pendientes en todos los canales.
+    # Se escalona a :10 para no coincidir con stories (:00) ni otros jobs.
+    _add_job(
+        scheduler, _job_hourly,
+        trigger=CronTrigger(minute=10),
+        args=[SessionLocal, medio.id],
+        job_id=f"{slug}_hourly",
+        name=f"{slug} — detección+métricas horaria (todos canales)",
+    )
+    log.info(f"[{slug}] Job horario registrado (cada :10 UTC)")
+
+    # ── Job diario — notificaciones + detección adicional ─────────────────────
+    # Sigue corriendo para emails y logs de resumen diario.
+    _add_job(
+        scheduler, _job_daily,
         trigger=CronTrigger(hour=int(h_d), minute=int(m_d)),
         args=[SessionLocal, medio.id],
-        id=f"{slug}_daily",
-        replace_existing=True,
-        name=f"{slug} — detección diaria",
+        job_id=f"{slug}_daily",
+        name=f"{slug} — resumen diario + notificaciones",
     )
     log.info(f"[{slug}] Job diario registrado a las {hora_diario} UTC")
 
-    # Job stories horario — detecta nuevas + actualiza métricas activas (cada hora en punto)
-    scheduler.add_job(
-        func=_job_stories_hourly,
+    # ── Stories: cada hora en punto (:00) ─────────────────────────────────────
+    _add_job(
+        scheduler, _job_stories_hourly,
         trigger=CronTrigger(minute=0),
         args=[SessionLocal, medio.id],
-        id=f"{slug}_stories_hourly",
-        replace_existing=True,
+        job_id=f"{slug}_stories_hourly",
         name=f"{slug} — stories horario",
     )
-    # Job captura final stories — cada minuto entre :50 y :59 (solo actúa si hay stories próximas)
-    scheduler.add_job(
-        func=_job_stories_final,
+    # Captura final stories: :50-:59 cada hora
+    _add_job(
+        scheduler, _job_stories_final,
         trigger=CronTrigger(minute="50-59"),
         args=[SessionLocal, medio.id],
-        id=f"{slug}_stories_final",
-        replace_existing=True,
+        job_id=f"{slug}_stories_final",
         name=f"{slug} — stories captura final",
+        misfire_grace_time=60,  # captura final: solo vale por 1 min
     )
-    log.info(f"[{slug}] Jobs stories: horario (cada :00) + captura final (:50-:59)")
+    log.info(f"[{slug}] Jobs stories: horario (:00) + captura final (:50-:59)")
 
-    # Job actualización Shorts cada 48h (datos fiables solo a partir de 48h)
-    scheduler.add_job(
-        func=_job_shorts_update,
-        trigger="interval",
-        hours=48,
+    # ── Shorts: cada 48h ───────────────────────────────────────────────────────
+    _add_job(
+        scheduler, _job_shorts_update,
+        trigger="interval", hours=48,
         args=[SessionLocal, medio.id],
-        id=f"{slug}_youtube_shorts_update",
-        replace_existing=True,
+        job_id=f"{slug}_youtube_shorts_update",
         name=f"{slug} — YouTube Shorts actualización 48h",
     )
     log.info(f"[{slug}] Job Shorts update registrado (intervalo 48h)")
 
-    # Jobs semanales — cada lunes, escalonados para no saturar las APIs
+    # ── Jobs semanales — lunes, escalonados ───────────────────────────────────
     _WEEKLY_FUNCS = [
-        ("web_ga4",        0,  0,  "GA4 histórico",           _job_weekly_web_ga4),
-        ("youtube",        0,  30, "YouTube Analytics",       _job_weekly_youtube),
-        ("youtube_shorts", 0,  45, "YouTube Shorts Analytics",_job_weekly_youtube_shorts),
-        ("instagram",      1,  0,  "Instagram snapshot",      _job_weekly_instagram),
-        ("facebook",       1,  30, "Facebook snapshot",       _job_weekly_facebook),
-        ("threads",        2,  0,  "Threads snapshot",        _job_weekly_threads),
-        ("tiktok",         2,  30, "TikTok snapshot",         _job_weekly_tiktok),
+        ("web_ga4",        0,  0,  "GA4 histórico",            _job_weekly_web_ga4),
+        ("youtube",        0,  30, "YouTube Analytics",        _job_weekly_youtube),
+        ("youtube_shorts", 0,  45, "YouTube Shorts Analytics", _job_weekly_youtube_shorts),
+        ("instagram",      1,  0,  "Instagram snapshot",       _job_weekly_instagram),
+        ("facebook",       1,  30, "Facebook snapshot",        _job_weekly_facebook),
+        ("threads",        2,  0,  "Threads snapshot",         _job_weekly_threads),
+        ("tiktok",         2,  30, "TikTok snapshot",          _job_weekly_tiktok),
     ]
     for job_name, hour, minute, desc, func in _WEEKLY_FUNCS:
-        scheduler.add_job(
-            func=func,
+        _add_job(
+            scheduler, func,
             trigger=CronTrigger(day_of_week="mon", hour=hour, minute=minute),
             args=[SessionLocal, medio.id],
-            id=f"{slug}_weekly_{job_name}",
-            replace_existing=True,
+            job_id=f"{slug}_weekly_{job_name}",
             name=f"{slug} — {desc}",
         )
-    log.info(f"[{slug}] Jobs semanales registrados (lunes 00:00→02:00 UTC)")
+    log.info(f"[{slug}] Jobs semanales registrados (lunes 00:00→02:30 UTC)")
 
-    # Job semanal métricas pagadas — martes 03:00 UTC (después de todos los snapshots)
-    scheduler.add_job(
-        func=_job_weekly_paid_metrics,
+    # ── Métricas pagadas — martes 03:00 UTC ───────────────────────────────────
+    _add_job(
+        scheduler, _job_weekly_paid_metrics,
         trigger=CronTrigger(day_of_week="tue", hour=3, minute=0),
         args=[SessionLocal, medio.id],
-        id=f"{slug}_weekly_paid_metrics",
-        replace_existing=True,
+        job_id=f"{slug}_weekly_paid_metrics",
         name=f"{slug} — Sync métricas pagadas (Ads)",
     )
     log.info(f"[{slug}] Job paid_metrics registrado (martes 03:00 UTC)")
 
 
-def _job_daily(SessionLocal, medio_id: int):
-    """Función ejecutada por el scheduler — crea su propia sesión DB."""
-    with SessionLocal() as db:
+def _safe_session(SessionLocal, medio_id: int):
+    """Abre sesión y carga medio de forma segura. Devuelve (db, medio) o (None, None)."""
+    try:
+        db = SessionLocal()
         medio = db.get(Medio, medio_id)
-        if medio:
-            run_daily(db, medio)
+        if not medio or not medio.activo:
+            db.close()
+            return None, None
+        return db, medio
+    except Exception as ex:
+        log.error(f"[scheduler] Error abriendo sesión DB para medio {medio_id}: {ex}")
+        return None, None
+
+
+def _job_hourly(SessionLocal, medio_id: int):
+    """
+    Job horario (cada :10) — detecta nuevas publicaciones + actualiza métricas
+    pendientes para TODOS los canales. Cada agente va en su propio try/except
+    para que un fallo no afecte a los demás.
+    """
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db:
+        return
+
+    log_entry = _log_start(db, medio.id, "hourly_all", "horario")
+    errores = []
+    total_nuevas = 0
+    total_actualizadas = 0
+    total_revision = 0
+
+    for agente_name, agent in AGENTS.items():
+        try:
+            # 1. Detectar nuevas
+            checkpoint = _get_checkpoint(db, medio.id, agente_name)
+            nuevas_pubs = []
+            try:
+                nuevas_pubs = agent.detect_new(db, medio, checkpoint)
+                total_nuevas += len(nuevas_pubs)
+                total_revision += sum(
+                    1 for p in nuevas_pubs
+                    if p.estado_metricas == EstadoMetricasEnum.revisar
+                )
+            except Exception as ex:
+                log.error(f"[{medio.slug}/{agente_name}] detect_new falló: {ex}")
+                errores.append({"agente": agente_name, "fase": "detect_new", "error": str(ex)[:200]})
+
+            # 2. Actualizar métricas pendientes (solo canales con endpoint de métricas)
+            canal_enum = AGENT_CANAL.get(agente_name)
+            if canal_enum:
+                try:
+                    dias = medio.config.dias_actualizacion_auto if medio.config else 30
+                    umbral_fecha = datetime.now(timezone.utc) - timedelta(days=dias)
+                    pendientes = (
+                        db.query(Publicacion)
+                        .filter(
+                            Publicacion.medio_id == medio.id,
+                            Publicacion.canal == canal_enum,
+                            Publicacion.fecha_publicacion >= umbral_fecha,
+                            Publicacion.estado_metricas.in_([
+                                EstadoMetricasEnum.pendiente,
+                                EstadoMetricasEnum.error,
+                                EstadoMetricasEnum.actualizado,
+                            ]),
+                        )
+                        .order_by(
+                            Publicacion.ultima_actualizacion.is_(None).desc(),
+                            Publicacion.ultima_actualizacion.asc(),
+                        )
+                        .limit(30)
+                        .all()
+                    )
+                    if pendientes:
+                        actualizadas = agent.update_metrics(db, medio, pendientes)
+                        total_actualizadas += actualizadas
+                except Exception as ex:
+                    log.error(f"[{medio.slug}/{agente_name}] update_metrics falló: {ex}")
+                    errores.append({"agente": agente_name, "fase": "update_metrics", "error": str(ex)[:200]})
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+        except Exception as ex:
+            # Captura genérica por si algo falla fuera del try interior
+            log.error(f"[{medio.slug}/{agente_name}] Error inesperado en job horario: {ex}")
+            errores.append({"agente": agente_name, "fase": "general", "error": str(ex)[:200]})
+
+    _log_end(
+        db, log_entry,
+        nuevas=total_nuevas,
+        actualizadas=total_actualizadas,
+        revision=total_revision,
+        errores=errores if errores else None,
+    )
+    db.close()
+    if errores:
+        log.warning(f"[{medio.slug}] Job horario completado con {len(errores)} errores parciales")
+    else:
+        log.info(f"[{medio.slug}] Job horario OK — nuevas={total_nuevas} actualizadas={total_actualizadas}")
+
+
+def _job_daily(SessionLocal, medio_id: int):
+    """Job diario — notificaciones + detección de seguridad."""
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db:
+        return
+    try:
+        run_daily(db, medio)
+    except Exception as ex:
+        log.error(f"[{medio.slug if medio else medio_id}] Error en job diario: {ex}")
+    finally:
+        db.close()
 
 
 def _job_stories_hourly(SessionLocal, medio_id: int):
     """Job horario stories — detecta nuevas y actualiza métricas activas."""
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _check_stories_alert(db, medio)
-            log_entry = _log_start(db, medio.id, "instagram_stories_hourly", "stories")
-            errores = []
-            try:
-                nuevas = instagram_stories_agent.detect_and_update(db, medio)
-                _log_end(db, log_entry, nuevas=len(nuevas))
-            except Exception as ex:
-                log.error(f"[{medio.slug}] Error en stories horario: {ex}")
-                errores.append({"fase": "detect_and_update", "error": str(ex)})
-                _log_end(db, log_entry, errores=errores)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db:
+        return
+
+    _check_stories_alert(db, medio)
+    log_entry = _log_start(db, medio.id, "instagram_stories_hourly", "stories")
+    errores = []
+    nuevas = []
+    actualizadas_count = 0
+    try:
+        # detect_and_update devuelve solo las nuevas; las actualizadas se cuentan
+        # leyendo cuántas stories activas había antes de la llamada
+        activas_antes = db.query(Publicacion).filter(
+            Publicacion.medio_id == medio.id,
+            Publicacion.canal == CanalEnum.instagram_story,
+            Publicacion.estado_metricas != EstadoMetricasEnum.fijo,
+        ).count()
+        nuevas = instagram_stories_agent.detect_and_update(db, medio)
+        activas_despues = db.query(Publicacion).filter(
+            Publicacion.medio_id == medio.id,
+            Publicacion.canal == CanalEnum.instagram_story,
+            Publicacion.estado_metricas != EstadoMetricasEnum.fijo,
+        ).count()
+        # Las actualizadas son las que estaban activas y siguen activas (excluye las nuevas)
+        actualizadas_count = max(0, activas_antes - len(nuevas))
+        log.info(f"[{medio.slug}] Stories: {len(nuevas)} nuevas, ~{actualizadas_count} actualizadas, {activas_despues} aún activas")
+    except Exception as ex:
+        log.error(f"[{medio.slug}] Error en stories horario: {ex}")
+        errores.append({"fase": "detect_and_update", "error": str(ex)})
+    _log_end(db, log_entry, nuevas=len(nuevas), actualizadas=actualizadas_count, errores=errores if errores else None)
+    db.close()
 
 
 def _job_stories_final(SessionLocal, medio_id: int):
     """Job captura final stories — :50-:59 cada hora, solo si hay stories próximas a caducar."""
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            log_entry = _log_start(db, medio.id, "instagram_stories_final", "stories")
-            errores = []
-            try:
-                n = instagram_stories_agent.capture_final(db, medio)
-                _log_end(db, log_entry, actualizadas=n)
-            except Exception as ex:
-                log.error(f"[{medio.slug}] Error en stories captura final: {ex}")
-                errores.append({"fase": "capture_final", "error": str(ex)})
-                _log_end(db, log_entry, errores=errores)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db:
+        return
+    log_entry = _log_start(db, medio.id, "instagram_stories_final", "stories")
+    errores = []
+    try:
+        n = instagram_stories_agent.capture_final(db, medio)
+        _log_end(db, log_entry, actualizadas=n)
+    except Exception as ex:
+        log.error(f"[{medio.slug}] Error en stories captura final: {ex}")
+        errores.append({"fase": "capture_final", "error": str(ex)})
+        _log_end(db, log_entry, errores=errores)
+    finally:
+        db.close()
 
 
 def _check_stories_alert(db: Session, medio: Medio):
@@ -465,116 +622,129 @@ def _check_stories_alert(db: Session, medio: Medio):
 
 
 def _job_weekly_web_ga4(SessionLocal, medio_id: int):
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _run_weekly_agent(db, medio, "web_ga4", web_agent.update_weekly_ga4)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "web_ga4", web_agent.update_weekly_ga4)
+    finally:
+        db.close()
 
 
 def _job_shorts_update(SessionLocal, medio_id: int):
     """Job de actualización de Shorts cada 48h — solo procesa los shorts con > 48h de antigüedad."""
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if not medio or not medio.activo:
-            return
-        log_entry = _log_start(db, medio.id, "youtube_shorts", "shorts_update")
-        errores = []
-        actualizadas = 0
-        try:
-            from datetime import timedelta
-            umbral_48h = datetime.now(timezone.utc) - timedelta(hours=48)
-            pubs = (
-                db.query(Publicacion)
-                .filter(
-                    Publicacion.medio_id == medio.id,
-                    Publicacion.canal == CanalEnum.youtube_short,
-                    Publicacion.fecha_publicacion <= umbral_48h,
-                    Publicacion.estado_metricas.in_([
-                        EstadoMetricasEnum.pendiente,
-                        EstadoMetricasEnum.actualizado,
-                    ]),
-                )
-                .order_by(
-                    Publicacion.ultima_actualizacion.is_(None).desc(),
-                    Publicacion.ultima_actualizacion.asc(),
-                )
-                .limit(50)
-                .all()
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    log_entry = _log_start(db, medio.id, "youtube_shorts", "shorts_update")
+    errores = []
+    actualizadas = 0
+    try:
+        umbral_48h = datetime.now(timezone.utc) - timedelta(hours=48)
+        pubs = (
+            db.query(Publicacion)
+            .filter(
+                Publicacion.medio_id == medio.id,
+                Publicacion.canal == CanalEnum.youtube_short,
+                Publicacion.fecha_publicacion <= umbral_48h,
+                Publicacion.estado_metricas.in_([
+                    EstadoMetricasEnum.pendiente,
+                    EstadoMetricasEnum.actualizado,
+                ]),
             )
-            if pubs:
-                actualizadas = youtube_shorts_agent.update_metrics(db, medio, pubs)
-        except Exception as ex:
-            log.error(f"[{medio.slug}] Error en Shorts update 48h: {ex}")
-            errores.append({"fase": "update_metrics", "error": str(ex)})
+            .order_by(
+                Publicacion.ultima_actualizacion.is_(None).desc(),
+                Publicacion.ultima_actualizacion.asc(),
+            )
+            .limit(50)
+            .all()
+        )
+        if pubs:
+            actualizadas = youtube_shorts_agent.update_metrics(db, medio, pubs)
+    except Exception as ex:
+        log.error(f"[{medio.slug}] Error en Shorts update 48h: {ex}")
+        errores.append({"fase": "update_metrics", "error": str(ex)})
+    finally:
         _log_end(db, log_entry, actualizadas=actualizadas, errores=errores if errores else None)
+        db.close()
 
 
 def _job_weekly_youtube(SessionLocal, medio_id: int):
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _run_weekly_agent(db, medio, "youtube", youtube_agent.update_weekly_youtube)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "youtube", youtube_agent.update_weekly_youtube)
+    finally:
+        db.close()
 
 
 def _job_weekly_youtube_shorts(SessionLocal, medio_id: int):
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _run_weekly_agent(db, medio, "youtube_shorts", youtube_shorts_agent.snapshot_weekly)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "youtube_shorts", youtube_shorts_agent.snapshot_weekly)
+    finally:
+        db.close()
 
 
 def _job_weekly_instagram(SessionLocal, medio_id: int):
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _run_weekly_agent(db, medio, "instagram", instagram_agent.snapshot_weekly)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "instagram", instagram_agent.snapshot_weekly)
+    finally:
+        db.close()
 
 
 def _job_weekly_facebook(SessionLocal, medio_id: int):
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _run_weekly_agent(db, medio, "facebook", facebook_agent.snapshot_weekly)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "facebook", facebook_agent.snapshot_weekly)
+    finally:
+        db.close()
 
 
 def _job_weekly_threads(SessionLocal, medio_id: int):
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _run_weekly_agent(db, medio, "threads", threads_agent.snapshot_weekly)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "threads", threads_agent.snapshot_weekly)
+    finally:
+        db.close()
 
 
 def _job_weekly_tiktok(SessionLocal, medio_id: int):
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if medio and medio.activo:
-            _run_weekly_agent(db, medio, "tiktok", tiktok_agent.snapshot_weekly)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "tiktok", tiktok_agent.snapshot_weekly)
+    finally:
+        db.close()
 
 
 def _job_weekly_paid_metrics(SessionLocal, medio_id: int):
     """Job semanal (martes 03:00 UTC) — sincroniza métricas pagadas desde Meta Ads y Google Ads."""
-    with SessionLocal() as db:
-        medio = db.get(Medio, medio_id)
-        if not medio or not medio.activo:
-            return
-        log_entry = _log_start(db, medio.id, "paid_metrics", "semanal")
-        errores = []
-        actualizadas = 0
-        try:
-            n = meta_ads_agent.sync_paid_metrics(db, medio)
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    log_entry = _log_start(db, medio.id, "paid_metrics", "semanal")
+    errores = []
+    actualizadas = 0
+    try:
+        n = meta_ads_agent.sync_paid_metrics(db, medio)
+        actualizadas += n
+    except Exception as ex:
+        log.error(f"[{medio.slug}] Error meta_ads paid_metrics: {ex}")
+        errores.append({"fase": "meta_ads", "error": str(ex)})
+    try:
+        ok, _ = google_ads_agent.check_access(db, medio.id)
+        if ok:
+            n = google_ads_agent.sync_paid_metrics(db, medio)
             actualizadas += n
-        except Exception as ex:
-            log.error(f"[{medio.slug}] Error meta_ads paid_metrics: {ex}")
-            errores.append({"fase": "meta_ads", "error": str(ex)})
-        try:
-            ok, _ = google_ads_agent.check_access(db, medio.id)
-            if ok:
-                n = google_ads_agent.sync_paid_metrics(db, medio)
-                actualizadas += n
-        except Exception as ex:
-            log.error(f"[{medio.slug}] Error google_ads paid_metrics: {ex}")
-            errores.append({"fase": "google_ads", "error": str(ex)})
+    except Exception as ex:
+        log.error(f"[{medio.slug}] Error google_ads paid_metrics: {ex}")
+        errores.append({"fase": "google_ads", "error": str(ex)})
+    finally:
         _log_end(db, log_entry, actualizadas=actualizadas, errores=errores if errores else None)
+        db.close()
 
 
 def _run_weekly_agent(db: Session, medio: Medio, agente_name: str, func) -> int:
