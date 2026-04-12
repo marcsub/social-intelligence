@@ -64,7 +64,7 @@ const CANAL_LABELS = {
   youtube_short: "Shorts",
   x: "X / Twitter",
   tiktok: "TikTok",
-  reel: "Reels",
+  reel: "Reel",
   threads: "Threads",
 };
 const ESTADO_STYLE = {
@@ -593,7 +593,7 @@ const CANALES_OPTS = [
   ["web","Web"],
   ["instagram_post","Instagram"],
   ["instagram_story","Stories"],
-  ["reel","Reels"],
+  ["reel","Reel"],
   ["facebook","Facebook"],
   ["youtube","YouTube"],
   ["youtube_short","Shorts"],

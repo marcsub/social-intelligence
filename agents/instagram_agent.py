@@ -52,9 +52,9 @@ INSIGHTS_MAX_AGE_DAYS = 730  # Meta no proporciona insights para posts con > 24 
 # Métricas válidas en v21.0 para posts/carruseles/videos
 MEDIA_METRICS = "reach,saved,shares,likes,comments"
 
-# Métricas para Reels: plays es el equivalente a impressions
-# reach = cuentas únicas que lo vieron; plays = reproducciones totales
-REEL_METRICS  = "plays,reach,saved,shares,likes,comments"
+# Métricas para Reels: plays deprecado desde API v22.0 — solo reach/engagement
+# reach = cuentas únicas que lo vieron (métrica principal)
+REEL_METRICS  = "reach,saved,shares,likes,comments"
 
 TIPO_MAP = {
     "IMAGE":          TipoEnum.post,
@@ -138,7 +138,7 @@ def _get_media_insights(token: str, media_id: str, media_type: str = "") -> dict
     Para REELS usa REEL_METRICS (incluye plays).
     Si reach=0 en Reels, usa plays como fallback de alcance.
     """
-    result = {"reach": 0, "saved": 0, "shares": 0, "likes": 0, "comments": 0, "plays": 0}
+    result = {"reach": 0, "saved": 0, "shares": 0, "likes": 0, "comments": 0}
     is_reel = (media_type == "REELS" or media_type == "REEL")
     metrics = REEL_METRICS if is_reel else MEDIA_METRICS
     try:
@@ -148,10 +148,6 @@ def _get_media_insights(token: str, media_id: str, media_type: str = "") -> dict
             values = item.get("values", [])
             if values and name in result:
                 result[name] = int(values[-1].get("value", 0))
-        # Para Reels: si reach=0 usar plays como proxy de alcance
-        if is_reel and result["reach"] == 0 and result["plays"] > 0:
-            result["reach"] = result["plays"]
-            log.info(f"[Instagram] Reel {media_id}: reach=0, usando plays={result['plays']} como reach")
     except InsightsExpiredError:
         raise  # propagar al caller para manejo con contador de intentos
     except Exception as ex:
