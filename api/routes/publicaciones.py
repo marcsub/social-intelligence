@@ -197,6 +197,7 @@ def list_publicaciones(
     estado: Optional[str] = None,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
+    patrocinado: Optional[str] = None,
     page: int = 1,
     per_page: int = 50,
     db: Session = Depends(get_db),
@@ -233,6 +234,10 @@ def list_publicaciones(
         q = q.filter(Publicacion.fecha_publicacion >= datetime.combine(fecha_desde, datetime.min.time()))
     if fecha_hasta:
         q = q.filter(Publicacion.fecha_publicacion <= datetime.combine(fecha_hasta, datetime.max.time()))
+    if patrocinado == "1":
+        q = q.filter(Publicacion.inversion_pagada > 0)
+    elif patrocinado == "0":
+        q = q.filter((Publicacion.inversion_pagada == None) | (Publicacion.inversion_pagada == 0))
 
     total = q.count()
     reach_total = q.with_entities(func.coalesce(func.sum(Publicacion.reach), 0)).scalar()

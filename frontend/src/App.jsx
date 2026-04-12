@@ -870,12 +870,19 @@ function MultiMarcaSelector({ value, onChange, marcas }) {
 
 function PublicacionesPage({ slug, api }) {
   const [marcas, setMarcas] = useState([]);
-  const initFiltros = { marca_id: "", canales: [], estado: "", fecha_desde: "", fecha_hasta: "" };
+  const initFiltros = { marca_id: "", canales: [], estado: "", fecha_desde: "", fecha_hasta: "", patrocinado: "" };
   const [filtros, setFiltros] = useState(initFiltros);
   const [applied, setApplied] = useState(initFiltros);
   const [page, setPage] = useState(1);
   // sortConfig: [{col, dir}] — dir: "asc" | "desc"
   const [sortConfig, setSortConfig] = useState([]);
+  const [canalOpen, setCanalOpen] = useState(false);
+  const canalRef = useRef(null);
+  useEffect(() => {
+    const handler = e => { if (canalRef.current && !canalRef.current.contains(e.target)) setCanalOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -934,9 +941,10 @@ function PublicacionesPage({ slug, api }) {
         if (sinReel.length) p.set("canal", sinReel.join(","));
         if (conReel) p.set("tipo", "reel");
       }
-      if (applied.estado)      p.set("estado", applied.estado);
-      if (applied.fecha_desde) p.set("fecha_desde", applied.fecha_desde);
-      if (applied.fecha_hasta) p.set("fecha_hasta", applied.fecha_hasta);
+      if (applied.estado)       p.set("estado", applied.estado);
+      if (applied.fecha_desde)  p.set("fecha_desde", applied.fecha_desde);
+      if (applied.fecha_hasta)  p.set("fecha_hasta", applied.fecha_hasta);
+      if (applied.patrocinado)  p.set("patrocinado", applied.patrocinado);
       const d = await api("GET", `/medios/${slug}/publicaciones?${p}`);
       setData(d);
     } catch (ex) {
@@ -1110,32 +1118,61 @@ function PublicacionesPage({ slug, api }) {
               {marcas.map(m => <option key={m.id} value={m.id}>{m.nombre_canonico}</option>)}
             </select>
           </div>
-          <div style={{ position:"relative" }}>
+          {/* Canal — dropdown custom multiselect */}
+          <div ref={canalRef} style={{ position:"relative" }}>
             <div style={{ fontSize:11, color:"#888", marginBottom:4 }}>Canal</div>
-            <select
-              multiple
-              style={{ ...s.select, height: 32, minWidth: 140, cursor:"pointer" }}
-              value={filtros.canales}
-              onChange={e => {
-                const sel = Array.from(e.target.selectedOptions).map(o => o.value);
-                setFiltros({ ...filtros, canales: sel });
-              }}
-              size={1}
-              title={filtros.canales.length ? filtros.canales.map(c => CANALES_OPTS.find(([v])=>v===c)?.[1]||c).join(", ") : "Todos los canales"}
+            <button
+              type="button"
+              onClick={() => setCanalOpen(o => !o)}
+              style={{ ...s.select, display:"flex", alignItems:"center", justifyContent:"space-between",
+                gap:8, minWidth:160, cursor:"pointer", background:"#fff", textAlign:"left" }}
             >
-              {CANALES_OPTS.map(([v,l]) => (
-                <option key={v} value={v} style={{ padding:"2px 6px" }}>{filtros.canales.includes(v) ? "✓ "+l : "\u00a0\u00a0 "+l}</option>
-              ))}
-            </select>
-            {filtros.canales.length > 0 && (
-              <span style={{ position:"absolute", top:18, right:6, background:"#185FA5", color:"#fff",
-                borderRadius:10, fontSize:10, padding:"1px 5px", pointerEvents:"none" }}>
-                {filtros.canales.length}
+              <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color: filtros.canales.length ? "#1a1a2e" : "#888" }}>
+                {filtros.canales.length === 0
+                  ? "Todos los canales"
+                  : filtros.canales.map(c => CANALES_OPTS.find(([v])=>v===c)?.[1]||c).join(", ")}
               </span>
-            )}
-            {filtros.canales.length === 0 && (
-              <div style={{ position:"absolute", top:22, left:8, fontSize:13, color:"#555", pointerEvents:"none" }}>
-                Todos los canales
+              <span style={{ fontSize:10, color:"#888", flexShrink:0 }}>
+                {filtros.canales.length > 0
+                  ? <span style={{ background:"#185FA5", color:"#fff", borderRadius:10, padding:"1px 6px", fontSize:10 }}>{filtros.canales.length}</span>
+                  : "▾"}
+              </span>
+            </button>
+            {canalOpen && (
+              <div style={{ position:"absolute", top:"100%", left:0, zIndex:999, background:"#fff",
+                border:"1px solid #ddd", borderRadius:8, boxShadow:"0 4px 16px rgba(0,0,0,.12)",
+                minWidth:180, padding:"6px 0", marginTop:2 }}>
+                {CANALES_OPTS.map(([v, l]) => {
+                  const checked = filtros.canales.includes(v);
+                  return (
+                    <label key={v} style={{ display:"flex", alignItems:"center", gap:8,
+                      padding:"6px 14px", cursor:"pointer", fontSize:13,
+                      background: checked ? "#EBF4FF" : "transparent",
+                      color: checked ? "#185FA5" : "#1a1a2e" }}
+                      onMouseEnter={e => e.currentTarget.style.background = checked ? "#daeaf8" : "#f5f6fa"}
+                      onMouseLeave={e => e.currentTarget.style.background = checked ? "#EBF4FF" : "transparent"}
+                      onClick={() => {
+                        const next = checked
+                          ? filtros.canales.filter(c => c !== v)
+                          : [...filtros.canales, v];
+                        setFiltros({...filtros, canales: next});
+                      }}
+                    >
+                      <input type="checkbox" checked={checked} readOnly
+                        style={{ accentColor:"#185FA5", width:14, height:14 }} />
+                      {l}
+                    </label>
+                  );
+                })}
+                {filtros.canales.length > 0 && (
+                  <div style={{ borderTop:"1px solid #eee", margin:"4px 0", padding:"6px 14px" }}>
+                    <button type="button"
+                      onClick={() => setFiltros({...filtros, canales:[]})}
+                      style={{ fontSize:12, color:"#888", background:"none", border:"none", cursor:"pointer", padding:0 }}>
+                      Limpiar selección
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1143,6 +1180,14 @@ function PublicacionesPage({ slug, api }) {
             <div style={{ fontSize:11, color:"#888", marginBottom:4 }}>Estado</div>
             <select style={s.select} value={filtros.estado} onChange={e => setFiltros({...filtros, estado: e.target.value})}>
               {ESTADOS_OPTS.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize:11, color:"#888", marginBottom:4 }}>Patrocinado</div>
+            <select style={s.select} value={filtros.patrocinado} onChange={e => setFiltros({...filtros, patrocinado: e.target.value})}>
+              <option value="">Todos</option>
+              <option value="1">Solo patrocinados</option>
+              <option value="0">Sin patrocinar</option>
             </select>
           </div>
           <div>
