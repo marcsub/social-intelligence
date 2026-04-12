@@ -13,6 +13,7 @@ Para obtener los tokens iniciales:
     python scripts/authorize_tiktok.py --slug roadrunningreview
 """
 import logging
+import re
 import json
 import urllib.request
 import urllib.parse
@@ -247,6 +248,11 @@ def _parse_video(video: dict, medio: Medio, db: Session) -> Optional[Publicacion
     # Texto del vídeo (título o descripción)
     titulo = (video.get("title") or video.get("video_description") or "").strip()
 
+    # Etiquetas: @menciones en la descripción
+    description = (video.get("video_description") or titulo or "")
+    mentions = re.findall(r"@(\w+)", description)
+    etiquetas_json = json.dumps([f"@{m}" for m in dict.fromkeys(mentions)], ensure_ascii=False) if mentions else None
+
     # Métricas
     reach    = int(video.get("view_count",    0) or 0)
     likes    = int(video.get("like_count",    0) or 0)
@@ -281,6 +287,7 @@ def _parse_video(video: dict, medio: Medio, db: Session) -> Optional[Publicacion
         estado_marca         = estado_marca,
         estado_metricas      = estado_metricas,
         ultima_actualizacion = datetime.now(timezone.utc),
+        etiquetas            = etiquetas_json,
     )
     return pub
 
@@ -434,3 +441,24 @@ def snapshot_weekly(db: Session, medio: Medio) -> int:
         log.info(f"[{medio.slug}/tiktok] Snapshot semanal {semana}: {guardados} registros")
 
     return guardados
+
+
+# ── Backfill de etiquetas ─────────────────────────────────────────────────────
+
+def update_etiquetas(db: Session, medio: Medio, publicaciones: list[Publicacion]) -> int:
+    """
+    Extrae @menciones del campo texto (video_description) de publicaciones TikTok
+    ya existentes y actualiza etiquetas. No requiere llamada a la API.
+    """
+    actualizadas = 0
+    for pub in publicaciones:
+        description = pub.texto or pub.titulo or ""
+        mentions = re.findall(r"@(\w+)", description)
+        if mentions:
+            pub.etiquetas = json.dumps([f"@{m}" for m in dict.fromkeys(mentions)], ensure_ascii=False)
+        else:
+            pub.etiquetas = None
+        actualizadas += 1
+    db.commit()
+    log.info(f"[{medio.slug}/tiktok] Etiquetas actualizadas: {actualizadas}/{len(publicaciones)}")
+    return actualizadas

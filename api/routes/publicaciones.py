@@ -4,6 +4,7 @@ Endpoints de publicaciones y analytics para un medio.
 Todas las rutas requieren autenticación JWT.
 """
 import logging
+import json
 log = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -92,7 +93,19 @@ def _pub_item(p: Publicacion, marcas_map: dict, agencias_map: dict, pub_marcas_m
         "intentos_fallidos": _parse_intentos(p.notas),
         "es_final": snap["es_final"] if snap else False,
         "hora_ultima_captura": snap["hora_snapshot"] if snap else None,
+        "etiquetas": _parse_etiquetas(p.etiquetas),
     }
+
+
+def _parse_etiquetas(val) -> list:
+    """Deserializa el campo etiquetas (JSON string) a lista Python."""
+    if not val:
+        return []
+    try:
+        result = json.loads(val)
+        return result if isinstance(result, list) else []
+    except Exception:
+        return []
 
 
 def _periodo_filtro(periodo: Optional[str], fecha_desde: Optional[date], fecha_hasta: Optional[date]):

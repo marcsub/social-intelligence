@@ -14,7 +14,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy.orm import Session
 
 from core.brand_id_agent import identify
@@ -165,6 +165,32 @@ def _extract_caption_parts(caption: str) -> tuple[str, str, str]:
     return clean, hashtags, mentions
 
 
+def _build_etiquetas(caption: str, usertags_data: list) -> Optional[str]:
+    """
+    Combina personas etiquetadas (usertags) y @menciones del caption.
+    Devuelve JSON string con lista de strings, o None si no hay nada.
+    - usertags_data: lista de dicts {'username': ...} de la API
+    - caption: texto del post (puede contener @mentions)
+    """
+    tags: List[str] = []
+    seen = set()
+
+    # 1. Usertags (personas etiquetadas explícitamente en la foto/vídeo)
+    for ut in (usertags_data or []):
+        username = (ut.get("username") or "").strip()
+        if username and username not in seen:
+            tags.append(f"@{username}")
+            seen.add(username)
+
+    # 2. @menciones del caption (si no están ya incluidas)
+    for m in re.findall(r"@(\w+)", caption or ""):
+        if m not in seen:
+            tags.append(f"@{m}")
+            seen.add(m)
+
+    return json.dumps(tags, ensure_ascii=False) if tags else None
+
+
 # ── Detección de publicaciones nuevas ────────────────────────────────────────
 
 def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> list[Publicacion]:
@@ -183,7 +209,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
     if checkpoint and checkpoint.tzinfo is None:
         checkpoint = checkpoint.replace(tzinfo=timezone.utc)
 
-    fields = "id,media_type,timestamp,permalink,caption,like_count,comments_count"
+    fields = "id,media_type,timestamp,permalink,caption,like_count,comments_count,usertags"
     config = medio.config
     umbral = config.umbral_confianza_marca if config else 80
 
@@ -241,6 +267,8 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
             permalink = item.get("permalink", "")
             likes    = int(item.get("like_count", 0) or 0)
             comments = int(item.get("comments_count", 0) or 0)
+            usertags_data = item.get("usertags", {}).get("data", []) if isinstance(item.get("usertags"), dict) else []
+            etiquetas_json = _build_etiquetas(caption, usertags_data)
 
             # Brand ID
             brand = identify(
@@ -292,6 +320,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
                 confianza_marca=brand.confianza if brand.confianza > 0 else None,
                 estado_marca=estado_marca,
                 notas=brand.razonamiento if estado == EstadoMetricasEnum.revisar else None,
+                etiquetas=etiquetas_json,
             )
             db.add(pub)
             db.flush()
@@ -522,4 +551,39 @@ def snapshot_weekly(db: Session, medio: Medio) -> int:
 
     db.commit()
     log.info(f"[{medio.slug}] Instagram snapshot_weekly: {actualizadas}/{len(pubs)}")
+    return actualizadas
+
+
+# ── Backfill de etiquetas ─────────────────────────────────────────────────────
+
+def update_etiquetas(db: Session, medio: Medio, publicaciones: list[Publicacion]) -> int:
+    """
+    Obtiene usertags y @menciones para una lista de publicaciones Instagram y
+    actualiza el campo etiquetas. Útil para backfill histórico.
+    """
+    access_token = _get_token(db, medio.id, "access_token")
+    if not access_token:
+        log.warning(f"[{medio.slug}] Sin token Instagram para update_etiquetas")
+        return 0
+
+    actualizadas = 0
+    for pub in publicaciones:
+        if not pub.id_externo:
+            continue
+        try:
+            data = _graph_get(
+                f"/{pub.id_externo}",
+                access_token,
+                {"fields": "usertags,caption"},
+            )
+            usertags_data = data.get("usertags", {}).get("data", []) if isinstance(data.get("usertags"), dict) else []
+            caption = data.get("caption", "") or pub.texto or ""
+            etiquetas_json = _build_etiquetas(caption, usertags_data)
+            pub.etiquetas = etiquetas_json
+            actualizadas += 1
+        except Exception as ex:
+            log.warning(f"[{medio.slug}] Error obteniendo etiquetas para {pub.id_externo}: {ex}")
+
+    db.commit()
+    log.info(f"[{medio.slug}] Instagram etiquetas actualizadas: {actualizadas}/{len(publicaciones)}")
     return actualizadas

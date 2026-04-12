@@ -6,6 +6,7 @@ OAuth 2.0 con refresh automático de token.
 """
 import logging
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -147,6 +148,9 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
     video_ids = [i["id"]["videoId"] for i in items if i.get("id", {}).get("videoId")]
     details_map = _get_video_details(yt, video_ids)
 
+    # Obtener mapa de playlists para todos los nuevos vídeos
+    playlists_map = _get_playlists_map(yt)
+
     nuevas = []
     umbral = config.umbral_confianza_marca if config else 80
 
@@ -199,6 +203,9 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         )
 
         stats = details_map.get(video_id, {})
+        # Playlists a las que pertenece este vídeo
+        pl_titles = playlists_map.get(video_id, [])
+        etiquetas_json = json.dumps(pl_titles, ensure_ascii=False) if pl_titles else None
         pub = Publicacion(
             medio_id=medio.id,
             marca_id=brand.marca_id,
@@ -217,6 +224,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
             confianza_marca=brand.confianza if brand.confianza > 0 else None,
             estado_marca=estado_marca,
             notas=brand.razonamiento if estado == EstadoMetricasEnum.revisar else None,
+            etiquetas=etiquetas_json,
         )
         db.add(pub)
         db.flush()
@@ -259,6 +267,54 @@ def _get_video_details(yt, video_ids: list[str]) -> dict:
     except Exception as ex:
         log.error(f"[YouTube] Error obteniendo detalles de vídeos: {ex}")
         return {}
+
+
+def _get_playlists_map(yt) -> dict:
+    """
+    Devuelve un mapa {video_id: [playlist_title, ...]} con todas las playlists
+    del canal y los vídeos que contiene cada una.
+    Hace paginación completa de playlists y de playlistItems.
+    """
+    video_playlists: dict = {}
+    try:
+        # Obtener todas las playlists del canal
+        next_page = None
+        playlists = []
+        while True:
+            kwargs = {"part": "snippet", "mine": True, "maxResults": 50}
+            if next_page:
+                kwargs["pageToken"] = next_page
+            resp = yt.playlists().list(**kwargs).execute()
+            for pl in resp.get("items", []):
+                playlists.append({"id": pl["id"], "title": pl["snippet"]["title"]})
+            next_page = resp.get("nextPageToken")
+            if not next_page:
+                break
+
+        # Para cada playlist, obtener todos sus items
+        for pl in playlists:
+            pl_id = pl["id"]
+            pl_title = pl["title"]
+            next_page = None
+            while True:
+                kwargs = {"part": "snippet", "playlistId": pl_id, "maxResults": 50}
+                if next_page:
+                    kwargs["pageToken"] = next_page
+                resp = yt.playlistItems().list(**kwargs).execute()
+                for item in resp.get("items", []):
+                    vid = item.get("snippet", {}).get("resourceId", {}).get("videoId")
+                    if vid:
+                        video_playlists.setdefault(vid, [])
+                        if pl_title not in video_playlists[vid]:
+                            video_playlists[vid].append(pl_title)
+                next_page = resp.get("nextPageToken")
+                if not next_page:
+                    break
+
+    except Exception as ex:
+        log.error(f"[YouTube] Error obteniendo playlists: {ex}")
+
+    return video_playlists
 
 
 # ── Actualización de métricas ─────────────────────────────────────────────────
@@ -611,3 +667,35 @@ def _get_analytics_views(yt_anal, video_id: str, fecha_pub: datetime) -> Optiona
     except Exception as ex:
         log.warning(f"[YouTube Analytics] Sin datos para {video_id}: {ex}")
         return None
+
+
+# ── Backfill de etiquetas ─────────────────────────────────────────────────────
+
+def update_etiquetas(db: Session, medio: Medio, publicaciones: list[Publicacion]) -> int:
+    """
+    Obtiene las playlists de YouTube y actualiza el campo etiquetas para
+    las publicaciones dadas. Construye el mapa de playlists una sola vez.
+    """
+    creds = _build_credentials(db, medio.id)
+    if not creds:
+        log.warning(f"[{medio.slug}] Sin credenciales YouTube para update_etiquetas")
+        return 0
+
+    try:
+        yt = build("youtube", "v3", credentials=creds, cache_discovery=False)
+    except Exception as ex:
+        log.error(f"[{medio.slug}] Error construyendo cliente YouTube: {ex}")
+        return 0
+
+    playlists_map = _get_playlists_map(yt)
+    actualizadas = 0
+    for pub in publicaciones:
+        if not pub.id_externo:
+            continue
+        pl_titles = playlists_map.get(pub.id_externo, [])
+        pub.etiquetas = json.dumps(pl_titles, ensure_ascii=False) if pl_titles else None
+        actualizadas += 1
+
+    db.commit()
+    log.info(f"[{medio.slug}] YouTube etiquetas actualizadas: {actualizadas}/{len(publicaciones)}")
+    return actualizadas

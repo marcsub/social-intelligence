@@ -250,6 +250,7 @@ class Publicacion(Base):
     captura_url         = Column(String(1000))                  # ruta local captura / link Drive
     texto               = Column(Text, nullable=True)           # caption / description / body del post
     notas               = Column(Text)
+    etiquetas           = Column(Text, nullable=True)           # JSON list: @mentions, usertags, playlists
     fecha_insercion     = Column(DateTime, default=func.now())
 
     # Relaciones

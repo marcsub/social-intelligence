@@ -870,7 +870,7 @@ function MultiMarcaSelector({ value, onChange, marcas }) {
 
 function PublicacionesPage({ slug, api }) {
   const [marcas, setMarcas] = useState([]);
-  const initFiltros = { marca_id: "", canales: [], estado: "", fecha_desde: "", fecha_hasta: "", patrocinado: "" };
+  const initFiltros = { marca_id: "", canales: [], estado: "", fecha_desde: "2026-01-01", fecha_hasta: "", patrocinado: "" };
   const [filtros, setFiltros] = useState(initFiltros);
   const [applied, setApplied] = useState(initFiltros);
   const [page, setPage] = useState(1);
@@ -1284,6 +1284,7 @@ function PublicacionesPage({ slug, api }) {
                     { col:"canal",             label:"Canal",       align:"left"  },
                     { col:null,                label:"Contenido",   align:"left"  },
                     { col:null,                label:"Marca",       align:"left", minWidth:160 },
+                    { col:null,                label:"Etiquetas",   align:"left", minWidth:120 },
                     { col:"reach",             label:"Reach",       align:"right" },
                     { col:"likes",             label:"Likes",       align:"right" },
                     { col:"inversion_pagada",  label:"Inversión €", align:"right", minWidth:90 },
@@ -1414,6 +1415,23 @@ function PublicacionesPage({ slug, api }) {
                         <ConfianzaBar value={item.confianza_marca} />
                         <MarcaBadge estadoMarca={marcasActual.length === 0 ? null : item.estado_marca} />
                       </div>
+                    </td>
+
+                    {/* Etiquetas */}
+                    <td style={{...s.td, maxWidth:180}}>
+                      {item.etiquetas?.length > 0 && (
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:3 }}>
+                          {item.etiquetas.map((tag, i) => (
+                            <span key={i} style={{
+                              display:"inline-block", padding:"1px 7px", borderRadius:12,
+                              fontSize:10, fontWeight:600, whiteSpace:"nowrap",
+                              background: tag.startsWith("@") ? "#ede9fe" : "#dbeafe",
+                              color: tag.startsWith("@") ? "#5b21b6" : "#1d4ed8",
+                              border: `1px solid ${tag.startsWith("@") ? "#c4b5fd" : "#93c5fd"}`,
+                            }}>{tag}</span>
+                          ))}
+                        </div>
+                      )}
                     </td>
 
                     {/* Reach */}
