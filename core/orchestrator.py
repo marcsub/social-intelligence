@@ -309,7 +309,10 @@ def setup_scheduler(SessionLocal: sessionmaker):
 
 
 def _add_job(scheduler, func, trigger, args, job_id, name, **kwargs):
-    """Wrapper seguro para add_job con opciones de robustez."""
+    """Wrapper seguro para add_job con opciones de robustez.
+    coalesce/max_instances/misfire_grace_time ya vienen de job_defaults;
+    sólo se pasan en kwargs si se quieren sobreescribir para un job concreto.
+    """
     scheduler.add_job(
         func=func,
         trigger=trigger,
@@ -317,9 +320,6 @@ def _add_job(scheduler, func, trigger, args, job_id, name, **kwargs):
         id=job_id,
         name=name,
         replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=3600,
         **kwargs,
     )
 
