@@ -135,12 +135,13 @@ def run_agent(db: Session, medio: Medio, agente_name: str, tipo: str = "diario")
         log.error(f"[{medio.slug}/{agente_name}] Error en detección: {ex}")
         errores.append({"fase": "deteccion", "error": str(ex)})
 
-    # 2. Actualización de métricas (publicaciones pendientes/viejas)
+    # 2. Actualización de métricas (publicaciones recientes pendientes/con error)
     actualizadas = 0
     canal_enum = AGENT_CANAL.get(agente_name)
     if canal_enum:
         try:
             dias = medio.config.dias_actualizacion_auto if medio.config else 30
+            # >= : publicaciones de los últimos N días (recientes, con métricas cambiantes)
             umbral_fecha = datetime.now(timezone.utc) - timedelta(days=dias)
 
             pendientes = (
@@ -148,9 +149,10 @@ def run_agent(db: Session, medio: Medio, agente_name: str, tipo: str = "diario")
                 .filter(
                     Publicacion.medio_id == medio.id,
                     Publicacion.canal == canal_enum,
-                    Publicacion.fecha_publicacion <= umbral_fecha,
+                    Publicacion.fecha_publicacion >= umbral_fecha,
                     Publicacion.estado_metricas.in_([
                         EstadoMetricasEnum.pendiente,
+                        EstadoMetricasEnum.error,
                         EstadoMetricasEnum.actualizado,
                     ]),
                 )
@@ -433,88 +435,25 @@ def _safe_session(SessionLocal, medio_id: int):
 def _job_hourly(SessionLocal, medio_id: int):
     """
     Job horario (cada :10) — detecta nuevas publicaciones + actualiza métricas
-    pendientes para TODOS los canales. Cada agente va en su propio try/except
-    para que un fallo no afecte a los demás.
+    para TODOS los canales. Usa run_agent() por agente para que cada uno tenga
+    su propio log y checkpoint independiente. Un fallo en un canal no afecta a los demás.
     """
     db, medio = _safe_session(SessionLocal, medio_id)
     if not db:
         return
-
-    log_entry = _log_start(db, medio.id, "hourly_all", "horario")
-    errores = []
-    total_nuevas = 0
-    total_actualizadas = 0
-    total_revision = 0
-
-    for agente_name, agent in AGENTS.items():
-        try:
-            # 1. Detectar nuevas
-            checkpoint = _get_checkpoint(db, medio.id, agente_name)
-            nuevas_pubs = []
+    try:
+        for agente_name in AGENTS:
             try:
-                nuevas_pubs = agent.detect_new(db, medio, checkpoint)
-                total_nuevas += len(nuevas_pubs)
-                total_revision += sum(
-                    1 for p in nuevas_pubs
-                    if p.estado_metricas == EstadoMetricasEnum.revisar
-                )
-            except Exception as ex:
-                log.error(f"[{medio.slug}/{agente_name}] detect_new falló: {ex}")
-                errores.append({"agente": agente_name, "fase": "detect_new", "error": str(ex)[:200]})
-
-            # 2. Actualizar métricas pendientes (solo canales con endpoint de métricas)
-            canal_enum = AGENT_CANAL.get(agente_name)
-            if canal_enum:
-                try:
-                    dias = medio.config.dias_actualizacion_auto if medio.config else 30
-                    umbral_fecha = datetime.now(timezone.utc) - timedelta(days=dias)
-                    pendientes = (
-                        db.query(Publicacion)
-                        .filter(
-                            Publicacion.medio_id == medio.id,
-                            Publicacion.canal == canal_enum,
-                            Publicacion.fecha_publicacion >= umbral_fecha,
-                            Publicacion.estado_metricas.in_([
-                                EstadoMetricasEnum.pendiente,
-                                EstadoMetricasEnum.error,
-                                EstadoMetricasEnum.actualizado,
-                            ]),
-                        )
-                        .order_by(
-                            Publicacion.ultima_actualizacion.is_(None).desc(),
-                            Publicacion.ultima_actualizacion.asc(),
-                        )
-                        .limit(30)
-                        .all()
+                result = run_agent(db, medio, agente_name, tipo="horario")
+                if result["nuevas"] or result["actualizadas"]:
+                    log.info(
+                        f"[{medio.slug}/{agente_name}] horario — "
+                        f"nuevas={result['nuevas']} actualizadas={result['actualizadas']}"
                     )
-                    if pendientes:
-                        actualizadas = agent.update_metrics(db, medio, pendientes)
-                        total_actualizadas += actualizadas
-                except Exception as ex:
-                    log.error(f"[{medio.slug}/{agente_name}] update_metrics falló: {ex}")
-                    errores.append({"agente": agente_name, "fase": "update_metrics", "error": str(ex)[:200]})
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
-
-        except Exception as ex:
-            # Captura genérica por si algo falla fuera del try interior
-            log.error(f"[{medio.slug}/{agente_name}] Error inesperado en job horario: {ex}")
-            errores.append({"agente": agente_name, "fase": "general", "error": str(ex)[:200]})
-
-    _log_end(
-        db, log_entry,
-        nuevas=total_nuevas,
-        actualizadas=total_actualizadas,
-        revision=total_revision,
-        errores=errores if errores else None,
-    )
-    db.close()
-    if errores:
-        log.warning(f"[{medio.slug}] Job horario completado con {len(errores)} errores parciales")
-    else:
-        log.info(f"[{medio.slug}] Job horario OK — nuevas={total_nuevas} actualizadas={total_actualizadas}")
+            except Exception as ex:
+                log.error(f"[{medio.slug}/{agente_name}] Error inesperado en job horario: {ex}")
+    finally:
+        db.close()
 
 
 def _job_daily(SessionLocal, medio_id: int):
