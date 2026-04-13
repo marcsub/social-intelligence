@@ -383,6 +383,8 @@ function PostsTable({ posts = [], variant = "top" }) {
 
 // ── Global Filters ────────────────────────────────────────────────────────────
 const PERIODOS = [
+  { value: "1w", label: "1 sem" },
+  { value: "2w", label: "2 sem" },
   { value: "1m", label: "1 mes" },
   { value: "3m", label: "3 meses" },
   { value: "6m", label: "6 meses" },

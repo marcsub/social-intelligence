@@ -114,7 +114,7 @@ def _periodo_filtro(periodo: Optional[str], fecha_desde: Optional[date], fecha_h
         fd = datetime.combine(fecha_desde, datetime.min.time()).replace(tzinfo=timezone.utc)
         fh = datetime.combine(fecha_hasta, datetime.max.time()).replace(tzinfo=timezone.utc)
         return fd, fh
-    dias = {"3m": 90, "6m": 180, "12m": 365}.get(periodo or "3m", 90)
+    dias = {"1w": 7, "2w": 14, "1m": 30, "3m": 90, "6m": 180, "1y": 365, "12m": 365}.get(periodo or "3m", 90)
     return now - timedelta(days=dias), now
 
 
