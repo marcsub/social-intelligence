@@ -809,3 +809,214 @@ def analytics_semanal(
             ]
 
     return {"semanas": semanas, "series": series, "por_marca": por_marca}
+
+
+@router.get("/medios/{slug}/analytics/dashboard")
+def analytics_dashboard(
+    slug: str,
+    periodo: Optional[str] = "3m",
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+    marca_id: Optional[int] = None,
+    canal: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _=Auth,
+):
+    from utils.semanas import get_semana_iso
+
+    medio = get_medio_or_404(slug, db)
+    fd, fh = _periodo_filtro(periodo, fecha_desde, fecha_hasta)
+
+    # ── Periodo anterior ───────────────────────────────────────────────────────
+    duracion = int((fh - fd).total_seconds() / 86400)
+    fd_prev = fd - timedelta(days=duracion)
+    fh_prev = fd - timedelta(days=1)
+
+    def _base_query(desde: datetime, hasta: datetime):
+        q = db.query(Publicacion).filter(
+            Publicacion.medio_id == medio.id,
+            Publicacion.fecha_publicacion >= desde,
+            Publicacion.fecha_publicacion <= hasta,
+        )
+        if marca_id is not None:
+            q = q.filter(Publicacion.marca_id == marca_id)
+        if canal:
+            try:
+                q = q.filter(Publicacion.canal == CanalEnum(canal))
+            except ValueError:
+                pass
+        return q
+
+    def _canal_kpis(base_q) -> dict:
+        rows = (
+            base_q.with_entities(
+                Publicacion.canal,
+                func.coalesce(func.sum(Publicacion.reach), 0).label("reach"),
+                func.coalesce(func.sum(Publicacion.likes), 0).label("likes"),
+                func.coalesce(func.sum(Publicacion.comments), 0).label("comments"),
+                func.coalesce(func.sum(Publicacion.shares), 0).label("shares"),
+                func.count(Publicacion.id).label("publicaciones"),
+                func.coalesce(func.sum(Publicacion.reach_pagado), 0).label("reach_pagado"),
+                func.coalesce(func.sum(Publicacion.inversion_pagada), 0).label("inversion_pagada"),
+            )
+            .group_by(Publicacion.canal)
+            .all()
+        )
+        result = {}
+        for r in rows:
+            k = r.canal.value if r.canal else "desconocido"
+            likes = int(r.likes)
+            comments = int(r.comments)
+            shares = int(r.shares)
+            result[k] = {
+                "reach": int(r.reach),
+                "likes": likes,
+                "comments": comments,
+                "shares": shares,
+                "engagement": likes + comments + shares,
+                "publicaciones": int(r.publicaciones),
+                "reach_pagado": int(r.reach_pagado),
+                "inversion_pagada": float(r.inversion_pagada) if r.inversion_pagada else 0.0,
+            }
+        return result
+
+    base_actual = _base_query(fd, fh)
+    base_prev = _base_query(fd_prev, fh_prev)
+
+    kpis = _canal_kpis(base_actual)
+    kpis_prev = _canal_kpis(base_prev)
+
+    # ── Top / bottom posts ─────────────────────────────────────────────────────
+    # Pre-load marcas para el medio
+    todas_marcas = {m.id: m.nombre_canonico for m in db.query(Marca).filter(Marca.medio_id == medio.id).all()}
+
+    def _post_item(p: Publicacion) -> dict:
+        eng = (p.likes or 0) + (p.comments or 0) + (p.shares or 0)
+        reach = p.reach or 0
+        eng_rate = round(eng / reach * 100, 2) if reach > 0 else 0.0
+        return {
+            "id": p.id,
+            "canal": p.canal.value if p.canal else None,
+            "tipo": p.tipo.value if p.tipo else None,
+            "titulo": p.titulo,
+            "texto": p.texto,
+            "url": p.url,
+            "fecha_publicacion": p.fecha_publicacion.isoformat() if p.fecha_publicacion else None,
+            "reach": reach,
+            "likes": p.likes or 0,
+            "comments": p.comments or 0,
+            "shares": p.shares or 0,
+            "engagement": eng,
+            "engagement_rate": eng_rate,
+            "marca": todas_marcas.get(p.marca_id) if p.marca_id else None,
+            "captura_url": p.captura_url,
+        }
+
+    engagement_expr = (
+        func.coalesce(Publicacion.likes, 0)
+        + func.coalesce(Publicacion.comments, 0)
+        + func.coalesce(Publicacion.shares, 0)
+    )
+
+    top_posts = (
+        base_actual
+        .order_by(engagement_expr.desc())
+        .limit(5)
+        .all()
+    )
+
+    bottom_posts = (
+        base_actual
+        .filter(engagement_expr > 0)
+        .order_by(engagement_expr.asc())
+        .limit(5)
+        .all()
+    )
+
+    # ── Semanal ────────────────────────────────────────────────────────────────
+    semana_fd = get_semana_iso(fd.date() if hasattr(fd, "date") else fd)
+    semana_fh = get_semana_iso(fh.date() if hasattr(fh, "date") else fh)
+
+    hist_q = (
+        db.query(
+            HistorialMetricas.semana_iso,
+            Publicacion.canal,
+            func.coalesce(func.sum(HistorialMetricas.likes_diff), 0).label("likes_diff"),
+            func.coalesce(func.sum(HistorialMetricas.comments_diff), 0).label("comments_diff"),
+            func.coalesce(func.sum(HistorialMetricas.shares_diff), 0).label("shares_diff"),
+        )
+        .join(Publicacion, HistorialMetricas.publicacion_id == Publicacion.id)
+        .filter(
+            Publicacion.medio_id == medio.id,
+            HistorialMetricas.semana_iso.isnot(None),
+            HistorialMetricas.semana_iso >= semana_fd,
+            HistorialMetricas.semana_iso <= semana_fh,
+        )
+    )
+    if marca_id is not None:
+        hist_q = hist_q.filter(Publicacion.marca_id == marca_id)
+    if canal:
+        try:
+            hist_q = hist_q.filter(Publicacion.canal == CanalEnum(canal))
+        except ValueError:
+            pass
+
+    hist_rows = (
+        hist_q
+        .group_by(HistorialMetricas.semana_iso, Publicacion.canal)
+        .order_by(HistorialMetricas.semana_iso)
+        .all()
+    )
+
+    semanas_set = sorted(set(r.semana_iso for r in hist_rows if r.semana_iso))
+    by_canal_sem: dict = defaultdict(lambda: defaultdict(int))
+    has_engagement_data = False
+
+    for r in hist_rows:
+        if r.semana_iso:
+            eng_diff = int(r.likes_diff) + int(r.comments_diff) + int(r.shares_diff)
+            by_canal_sem[r.canal.value][r.semana_iso] = eng_diff
+            if eng_diff > 0:
+                has_engagement_data = True
+
+    # Fallback: si no hay datos de historial, agrupar publicaciones por semana de fecha_publicacion
+    if not semanas_set or not has_engagement_data:
+        pub_rows = (
+            base_actual
+            .with_entities(
+                func.date_format(Publicacion.fecha_publicacion, '%Y-W%v').label("semana"),
+                Publicacion.canal,
+                func.coalesce(func.sum(Publicacion.likes), 0).label("likes"),
+                func.coalesce(func.sum(Publicacion.comments), 0).label("comments"),
+                func.coalesce(func.sum(Publicacion.shares), 0).label("shares"),
+            )
+            .group_by("semana", Publicacion.canal)
+            .order_by("semana")
+            .all()
+        )
+        semanas_set = sorted(set(r.semana for r in pub_rows if r.semana))
+        by_canal_sem = defaultdict(lambda: defaultdict(int))
+        for r in pub_rows:
+            if r.semana and r.canal:
+                eng = int(r.likes) + int(r.comments) + int(r.shares)
+                by_canal_sem[r.canal.value][r.semana] = eng
+
+    semanal_series = [
+        {"canal": c, "data": [by_canal_sem[c].get(s, 0) for s in semanas_set]}
+        for c in sorted(by_canal_sem.keys())
+    ]
+
+    return {
+        "periodo": {
+            "desde": fd.date().isoformat() if hasattr(fd, "date") else str(fd)[:10],
+            "hasta": fh.date().isoformat() if hasattr(fh, "date") else str(fh)[:10],
+        },
+        "kpis": kpis,
+        "kpis_periodo_anterior": kpis_prev,
+        "top_posts": [_post_item(p) for p in top_posts],
+        "bottom_posts": [_post_item(p) for p in bottom_posts],
+        "semanal": {
+            "semanas": semanas_set,
+            "series": semanal_series,
+        },
+    }

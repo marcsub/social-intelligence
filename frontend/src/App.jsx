@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Chart, registerables } from "chart.js";
+import DashboardPage from "./DashboardPage.jsx";
 Chart.register(...registerables);
 
 const API_BASE = import.meta.env.PROD ? "/social/api" : "/api";
@@ -2326,7 +2327,7 @@ export default function App() {
 
   if (!token) return <LoginPage onLogin={login} />;
 
-  const selectMedio = (slug) => { setSelectedMedio(slug); setPage("config"); };
+  const selectMedio = (slug) => { setSelectedMedio(slug); setPage("dashboard"); };
   const back = () => { setSelectedMedio(null); setPage("medios"); };
 
   const navMedio = (p) => setPage(p);
@@ -2353,8 +2354,7 @@ export default function App() {
               @{selectedMedio}
             </div>
             <div style={s.navSubItem(page === "config")} onClick={() => navMedio("config")}>Configuración</div>
-            <div style={s.navSubItem(page === "publicaciones")} onClick={() => navMedio("publicaciones")}>Publicaciones</div>
-            <div style={s.navSubItem(page === "analytics")} onClick={() => navMedio("analytics")}>Analytics</div>
+            <div style={s.navSubItem(page === "dashboard")} onClick={() => navMedio("dashboard")}>Dashboard</div>
           </>
         )}
 
@@ -2380,12 +2380,8 @@ export default function App() {
           </div>
         )}
 
-        {selectedMedio && page === "publicaciones" && (
-          <PublicacionesPage slug={selectedMedio} api={api} />
-        )}
-
-        {selectedMedio && page === "analytics" && (
-          <AnalyticsPage slug={selectedMedio} api={api} />
+        {selectedMedio && page === "dashboard" && (
+          <DashboardPage slug={selectedMedio} api={api} PublicacionesPage={PublicacionesPage} />
         )}
       </div>
     </div>
