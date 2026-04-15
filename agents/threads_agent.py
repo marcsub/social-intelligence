@@ -180,6 +180,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
 
             existente = db.query(Publicacion).filter(
                 Publicacion.medio_id == medio.id,
+                Publicacion.canal == CanalEnum.threads,
                 Publicacion.id_externo == post_id,
             ).first()
             if existente:

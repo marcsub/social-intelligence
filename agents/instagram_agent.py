@@ -257,6 +257,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
             # Evitar duplicados
             existente = db.query(Publicacion).filter(
                 Publicacion.medio_id == medio.id,
+                Publicacion.canal == CanalEnum.instagram_post,
                 Publicacion.id_externo == media_id,
             ).first()
             if existente:

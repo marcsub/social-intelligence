@@ -295,6 +295,7 @@ def detect_new(db: Session, medio: Medio, checkpoint: Optional[datetime]) -> lis
         id_externo = _pub_id(url)
         existente = db.query(Publicacion).filter(
             Publicacion.medio_id == medio.id,
+            Publicacion.canal == CanalEnum.web,
             Publicacion.id_externo == id_externo,
         ).first()
         if existente:
