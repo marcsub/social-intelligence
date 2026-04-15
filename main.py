@@ -131,6 +131,44 @@ async def tiktok_callback(code: str = None, error: str = None, state: str = None
     return HTMLResponse(html)
 
 
+@app.get("/auth/threads/callback")
+async def threads_callback(code: str = None, error: str = None, error_description: str = None):
+    """
+    Callback OAuth Threads. Meta redirige aquí con el código de autorización.
+    Muestra el código en pantalla para que el usuario lo copie en el script
+    authorize_threads.py.
+    No requiere autenticación JWT — es el destino de redirección del navegador.
+    """
+    from fastapi.responses import HTMLResponse
+    if error:
+        html = f"""<html><body style="font-family:system-ui;text-align:center;padding:60px">
+        <h2 style="color:#e53e3e">&#9888; Error en autorización Threads</h2>
+        <p><b>Error:</b> {error}</p>
+        <p><b>Descripción:</b> {error_description or ''}</p>
+        <p>Cierra esta ventana y revisa la configuración de la app en Meta Developers.</p>
+        </body></html>"""
+        return HTMLResponse(html, status_code=400)
+
+    if not code:
+        return HTMLResponse("<html><body><p>Sin código de autorización.</p></body></html>", status_code=400)
+
+    html = f"""<html>
+    <head><title>Threads autorizado</title></head>
+    <body style="font-family:system-ui;max-width:600px;margin:60px auto;text-align:center">
+      <h2 style="color:#000">&#9679; Autorización Threads completada</h2>
+      <p>Copia el siguiente código y pégalo en la terminal donde está esperando el script:</p>
+      <div style="background:#f4f4f5;border:1px solid #ddd;border-radius:8px;padding:20px;margin:24px 0;word-break:break-all;font-family:monospace;font-size:14px;text-align:left">
+        {code}
+      </div>
+      <button onclick="navigator.clipboard.writeText('{code}')"
+              style="background:#000;color:white;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px">
+        Copiar código
+      </button>
+      <p style="color:#888;margin-top:32px;font-size:13px">Puedes cerrar esta ventana una vez pegado el código.</p>
+    </body></html>"""
+    return HTMLResponse(html)
+
+
 @app.post("/api/medios/{slug}/update-marca/{marca_id}")
 async def update_marca(slug: str, marca_id: int, _=Depends(get_current_user)):
     """Actualiza métricas de todas las publicaciones de una marca."""

@@ -30,7 +30,7 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 THREADS_API  = "https://graph.threads.net"
-REDIRECT_URI = "http://localhost:8000/auth/threads/callback"
+REDIRECT_URI = "https://www.roadrunningreview.com/auth/threads/callback"
 SCOPES       = "threads_basic,threads_manage_insights"
 
 _auth_code = None
@@ -158,8 +158,9 @@ def main():
         print(f"  URL manual si no abre: {auth_url}\n")
         webbrowser.open(auth_url)
 
-        print("  Esperando callback en http://localhost:8000 …")
-        HTTPServer(("localhost", 8000), _CallbackHandler).handle_request()
+        print("  El navegador abrirá https://www.roadrunningreview.com/auth/threads/callback")
+        print("  La página mostrará el código de autorización. Cópialo y pégalo aquí:\n")
+        _auth_code = input("  Código de autorización: ").strip()
 
         if not _auth_code:
             print("ERROR: No se recibió el código de autorización"); sys.exit(1)

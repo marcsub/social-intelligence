@@ -1,15 +1,15 @@
 # Social Intelligence System — STATUS
 
-> Última actualización: 2026-04-11 — v0.8
+> Última actualización: 2026-04-15 — v0.9
 
 ---
 
 ## Descripción del proyecto
 
 Sistema multi-medio de recogida automática de métricas de publicaciones en redes sociales
-y web. Permite a ROADRUNNINGReview (y otros medios) agregar el reach, likes, shares y
-comentarios de todas sus publicaciones por marca, canal y período, generando informes de
-campaña y notificaciones automáticas a cada marca cliente.
+y web. Permite a ROADRUNNINGReview y TRAILRUNNINGReview (y otros medios) agregar el reach,
+likes, shares y comentarios de todas sus publicaciones por marca, canal y período, generando
+informes de campaña y notificaciones automáticas a cada marca cliente.
 
 ---
 
@@ -39,21 +39,6 @@ campaña y notificaciones automáticas a cada marca cliente.
 | API base URL prod | `API_BASE=/social/api` |
 | API base URL dev | `API_BASE=/api` |
 
-### Credenciales y IDs de producción
-
-| Parámetro | Valor |
-|-----------|-------|
-| DB usuario servidor | `pirineos` |
-| YouTube canal ID | `UCAc6Iskqwdoc05frp6eD0QA` |
-| Threads App ID | `1389357836567753` |
-| Threads User ID | `26958667087052227` |
-| Facebook Page ID | `1668731220040575` |
-| Instagram Account ID | `17841402263658371` |
-| GA4 Property ID | `373727530` |
-| **Google Ads customer_id** | `4405944785` (cuenta "Mal de Altura") |
-| **Google Ads developer_token** | cifrado en DB `canal=google_ads`, `clave=developer_token` |
-| **Google Ads OAuth** | `access_token` + `refresh_token` en DB `canal=google_ads` |
-
 ### Configuración Apache (mod_proxy)
 
 ```apache
@@ -76,9 +61,13 @@ campaña y notificaciones automáticas a cada marca cliente.
     ProxyPass /social/stories_images http://127.0.0.1:8000/stories_images
     ProxyPassReverse /social/stories_images http://127.0.0.1:8000/stories_images
 
+    # Auth callbacks OAuth (Threads, TikTok…)
+    ProxyPass /auth http://127.0.0.1:8000/auth
+    ProxyPassReverse /auth http://127.0.0.1:8000/auth
+
     # Frontend estático (build React)
-    Alias /social /home/pirineos/social-intelligence/frontend/dist
-    <Directory /home/pirineos/social-intelligence/frontend/dist>
+    Alias /social /home/pirineos/social-intelligence/static
+    <Directory /home/pirineos/social-intelligence/static>
         Options -Indexes
         AllowOverride All
         Require all granted
@@ -90,9 +79,101 @@ campaña y notificaciones automáticas a cada marca cliente.
 
 ## Medios configurados
 
-| slug | Nombre | URL web | RSS/Sitemap | Activo |
-|------|--------|---------|-------------|--------|
-| `roadrunningreview` | ROADRUNNINGReview | https://www.roadrunningreview.com | SiteMapTrailES0.xml | ✅ |
+| slug | Nombre | URL web | Sitemap | Activo | Marcas |
+|------|--------|---------|---------|--------|--------|
+| `roadrunningreview` | ROADRUNNINGReview | https://www.roadrunningreview.com | `SiteMapTrailES0.xml` | ✅ | 187 |
+| `trailrunningreview` | TRAILRUNNINGReview | https://www.trailrunningreview.com | `SiteMapTrailES1.xml` | ✅ | 258 |
+
+**Business Portfolio:** Horizonte Norte SL (compartido por ambos medios)
+
+### Credenciales — ROADRUNNINGReview
+
+| Parámetro | Valor |
+|-----------|-------|
+| DB usuario servidor | `pirineos` |
+| YouTube Canal ID | `UCAc6Iskqwdoc05frp6eD0QA` |
+| GA4 Property ID | `373727530` |
+| Instagram Account ID | `17841402263658371` |
+| Facebook Page ID | `1668731220040575` |
+| Threads User ID | `26958667087052227` |
+| Threads App ID | `1389357836567753` |
+| **Google Ads customer_id** | `4405944785` (cuenta "Mal de Altura") |
+| **Google Ads developer_token** | cifrado en DB `canal=google_ads`, `clave=developer_token` |
+| **Google Ads OAuth** | `access_token` + `refresh_token` en DB `canal=google_ads` |
+
+### Credenciales — TRAILRUNNINGReview
+
+| Parámetro | Valor |
+|-----------|-------|
+| YouTube Canal ID | `UC9wFjjB6qX_5VUaBGFssx8A` |
+| GA4 Property ID | `372768532` |
+| Instagram Account ID | `17841400253330854` |
+| Facebook Page ID | `139115256153733` |
+| Threads User ID | `27386364534299660` |
+| Threads App ID | `1389357836567753` (mismo que RRR) |
+
+---
+
+## Estado actual por canal — roadrunningreview
+
+*Datos a 2026-04-09*
+
+| Canal | Pubs | Reach total |
+|-------|-----:|------------:|
+| instagram_post | 503 | ~16.9M |
+| instagram_story | ~10 | — |
+| facebook | 503 | — |
+| web | ~293 | — |
+| youtube | ~49 | — |
+| youtube_short | ~30 | — |
+| threads | ~138 | — |
+| **TOTAL** | **~1.537** | **~30.1M** |
+
+**Top 10 marcas por reach acumulado** *(datos 2026-04-01)*:
+
+| # | Marca | Pubs | Reach |
+|---|-------|-----:|------:|
+| 1 | Adidas | 193 | 3.893.318 |
+| 2 | ASICS | 153 | 2.374.040 |
+| 3 | On | 91 | 1.855.878 |
+| 4 | Mizuno | 68 | 987.817 |
+| 5 | Nike | 66 | 921.465 |
+| 6 | Gore Running Wear | 37 | 780.162 |
+| 7 | Brooks | 85 | 711.015 |
+| 8 | Hoka | 80 | 601.892 |
+| 9 | Coros | 16 | 531.970 |
+| 10 | Kiprun | 29 | 431.834 |
+
+---
+
+## Estado actual por canal — trailrunningreview
+
+*Datos a 2026-04-15*
+
+| Canal | Pubs | Reach total |
+|-------|-----:|------------:|
+| web | 192 | — |
+| instagram_post | 2.000 | 50.8M |
+| facebook | 500 | 4.1M |
+| youtube | 90 | 417K |
+| youtube_short | 3 | 6.9K |
+| threads | 4 | 3.6K |
+| instagram_story | 0 | — (captura automática activa) |
+| **TOTAL** | **2.789** | **55.4M** |
+
+---
+
+## Estado global del sistema
+
+*Datos a 2026-04-15*
+
+| Medio | Pubs | Reach |
+|-------|-----:|------:|
+| ROADRUNNINGReview | ~1.537 | ~30.1M |
+| TRAILRUNNINGReview | 2.789 | 55.4M |
+| **TOTAL SISTEMA** | **~4.326** | **~85.5M** |
+
+**Jobs activos:** 26 (13 por medio)
 
 ---
 
@@ -113,62 +194,18 @@ campaña y notificaciones automáticas a cada marca cliente.
 
 ---
 
-## Estado actual por canal — roadrunningreview
-
-*Datos a 2026-04-09*
-
-| Canal | Pubs | Reach total | Likes | Shares | Actualizadas | Revisión | Pendiente | Errores |
-|-------|-----:|------------:|------:|-------:|-------------:|---------:|----------:|--------:|
-| instagram_post | 503 | ~16.9M | — | — | — | — | — | — |
-| instagram_story | ~10 | — | — | — | — | — | — | — |
-| facebook | 503 | — | — | — | — | — | — | — |
-| web | ~293 | — | — | — | — | — | — | — |
-| youtube | ~49 | — | — | — | — | — | — | — |
-| youtube_short | ~30 | — | — | — | — | — | — | — |
-| threads | ~138 | — | — | — | — | — | — | — |
-| **TOTAL** | **~1.537** | **~30.1M** | | | | | | |
-
-*En revisión: ~132 publicaciones*
-
-**Top 10 marcas por reach acumulado** *(datos 2026-04-01)*:
-
-| # | Marca | Pubs | Reach |
-|---|-------|-----:|------:|
-| 1 | Adidas | 193 | 3.893.318 |
-| 2 | ASICS | 153 | 2.374.040 |
-| 3 | On | 91 | 1.855.878 |
-| 4 | Mizuno | 68 | 987.817 |
-| 5 | Nike | 66 | 921.465 |
-| 6 | Gore Running Wear | 37 | 780.162 |
-| 7 | Brooks | 85 | 711.015 |
-| 8 | Hoka | 80 | 601.892 |
-| 9 | Coros | 16 | 531.970 |
-| 10 | Kiprun | 29 | 431.834 |
-
-**Estado de marcas:**
-- Total marcas en catálogo: **187**
-- `estimated` (asignadas automáticamente): **1.065**
-- `to_review` (pendientes validación): **269** → reducido a **~132**
-- Sin marca asignada: **97** publicaciones (7,3%)
-
-**Histórico semanal:**
-- Semanas con snapshot: **13** (2026-W02 → 2026-W14)
-- Total snapshots en `historial_metricas`: **630**
-
----
-
 ## Arquitectura de ficheros
 
 ### Backend
 
 | Fichero | Descripción | Estado |
 |---------|-------------|--------|
-| `main.py` | Punto de entrada FastAPI; inicializa DB, APScheduler, routers, sirve `stories_images/` | ✅ |
+| `main.py` | Punto de entrada FastAPI; inicializa DB, APScheduler, routers, sirve `stories_images/`; callbacks OAuth `/auth/threads/callback` + `/api/auth/tiktok/callback` | ✅ |
 | `models/database.py` | Esquema MySQL completo: todos los modelos y Enums | ✅ |
 | `core/settings.py` | Configuración global via Pydantic BaseSettings desde `.env` | ✅ |
 | `core/crypto.py` | Cifrado/descifrado Fernet para tokens API | ✅ |
 | `core/brand_id_agent.py` | Identificación marca/agencia por texto con aliases; fix substring→prefix activo | ✅ |
-| `core/orchestrator.py` | Coordinador de agentes, checkpoints, `LogEjecucion`, APScheduler | ✅ |
+| `core/orchestrator.py` | Coordinador de agentes, checkpoints, `LogEjecucion`, APScheduler; `run_agent()` + `run_stories()` | ✅ |
 | `core/notifier.py` | Digest email diario por marca/agencia via SMTP | ✅ |
 | `api/auth.py` | JWT login panel; `application/x-www-form-urlencoded` (no JSON) | ✅ |
 | `api/routes/medios.py` | CRUD medios, marcas, agencias, tokens cifrados | ✅ |
@@ -179,9 +216,9 @@ campaña y notificaciones automáticas a cada marca cliente.
 | `agents/instagram_agent.py` | Instagram Graph API; posts + reels; métricas separadas por tipo | ✅ |
 | `agents/instagram_stories_agent.py` | Captura Stories + imagen; `thumbnail_url` para VIDEO; retry si `captura_url=NULL` | ✅ |
 | `agents/facebook_agent.py` | Graph API v25.0; page token OAuth permanente; `post_impressions_unique`; skip >24m | ✅ |
-| `agents/threads_agent.py` | Threads API; App ID 1389357836567753; User ID 26958667087052227 | ✅ |
-| `agents/meta_ads_agent.py` | Meta Marketing API v25; fallo silencioso si falta permiso `ads_read` | 🆕 |
-| `agents/google_ads_agent.py` | Google Ads API v20; GAQL dual (FROM asset + FROM ad_group_ad); VIDEO_RESPONSIVE_AD; rango fechas explícito; refresh automático access_token | 🆕 |
+| `agents/threads_agent.py` | Threads API; App ID 1389357836567753; paginación hasta checkpoint | ✅ |
+| `agents/meta_ads_agent.py` | Meta Marketing API v25; fallo silencioso si falta permiso `ads_read` | ✅ |
+| `agents/google_ads_agent.py` | Google Ads API v20; GAQL dual (FROM asset + FROM ad_group_ad); VIDEO_RESPONSIVE_AD; rango fechas explícito; refresh automático access_token | ✅ |
 | `utils/semanas.py` | Helpers ISO week: `get_semana_iso`, `get_rango_semana`, `semanas_entre` | ✅ |
 
 ### Frontend — `frontend/src/App.jsx`
@@ -202,34 +239,30 @@ campaña y notificaciones automáticas a cada marca cliente.
 
 | Script | Propósito | Comando | Estado |
 |--------|-----------|---------|--------|
-| `authorize_meta.py` | Tokens Instagram + Facebook via Graph API Explorer | `python scripts/authorize_meta.py roadrunningreview` | ✅ |
-| `authorize_facebook.py` | OAuth flow completo → page token permanente | `python scripts/authorize_facebook.py --slug roadrunningreview` | ✅ |
-| `authorize_youtube.py` | OAuth2 YouTube → refresh token | `python scripts/authorize_youtube.py` | ✅ |
-| `export_youtube_tokens.py` | Exportar tokens YouTube para migrar entre entornos | `python scripts/export_youtube_tokens.py` | 🆕 |
-| `import_marcas.py` | Importación masiva catálogo de marcas (187) | `python scripts/import_marcas.py` | ✅ |
-| `backfill_historico.py` | Snapshots semanales históricos 2026 web + RRSS | `python scripts/backfill_historico.py --slug roadrunningreview` | ✅ |
-| `backfill_reels.py` | Backfill Reels Instagram 2026 con paginación completa | `python scripts/backfill_reels.py --slug roadrunningreview [--dry-run]` | ✅ |
-| `backfill_shorts_historico.py` | Histórico completo YouTube Shorts | `python scripts/backfill_shorts_historico.py --slug roadrunningreview` | 🆕 |
-| `backfill_texto.py` | Descargar textos de publicaciones (todos los canales) | `python scripts/backfill_texto.py --slug roadrunningreview` | 🆕 |
-| `fix_facebook_reach.py` | Rellena reach 500 pubs Facebook con `update_metrics()` v25.0 | `python scripts/fix_facebook_reach.py --slug roadrunningreview` | ✅ |
-| `fix_fechas_publicacion.py` | Corrige timestamps Meta (Python 3.10 compat) | `python scripts/fix_fechas_publicacion.py --slug roadrunningreview` | 🆕 |
-| `fix_web_fechas.py` | Corrige `datePublished` artículos web desde HTML | `python scripts/fix_web_fechas.py --slug roadrunningreview` | 🆕 |
-| `fix_story_images.py` | MP4 → thumbnail para Stories vídeo | `python scripts/fix_story_images.py --slug roadrunningreview` | 🆕 |
-| `fix_shorts_metrics.py` | Rellena métricas Shorts sin reach | `python scripts/fix_shorts_metrics.py --slug roadrunningreview` | 🆕 |
-| `fix_2026.py` | Diagnostica/corrige pubs 2026 no detectadas por checkpoint | `python scripts/fix_2026.py --slug roadrunningreview` | ✅ |
+| `authorize_meta.py` | Tokens Instagram + Facebook via Graph API Explorer | `python scripts/authorize_meta.py {slug}` | ✅ |
+| `authorize_facebook.py` | OAuth flow completo → page token permanente | `python scripts/authorize_facebook.py --slug {slug}` | ✅ |
+| `authorize_youtube.py` | OAuth2 YouTube → refresh token | `python scripts/authorize_youtube.py --slug {slug}` | ✅ |
+| `authorize_threads.py` | OAuth Threads → long-lived token 60 días; redirect URI HTTPS servidor prod | `python scripts/authorize_threads.py --slug {slug}` | ✅ |
+| `export_youtube_tokens.py` | Exportar tokens YouTube para migrar entre entornos | `python scripts/export_youtube_tokens.py` | ✅ |
+| `import_marcas.py` | Importación masiva catálogo de marcas | `python scripts/import_marcas.py` | ✅ |
+| `backfill_historico.py` | Snapshots semanales históricos 2026 web + RRSS | `python scripts/backfill_historico.py --slug {slug}` | ✅ |
+| `backfill_reels.py` | Backfill Reels Instagram 2026 con paginación completa | `python scripts/backfill_reels.py --slug {slug} [--dry-run]` | ✅ |
+| `backfill_shorts_historico.py` | Histórico completo YouTube Shorts | `python scripts/backfill_shorts_historico.py --slug {slug}` | ✅ |
+| `backfill_texto.py` | Descargar textos de publicaciones (todos los canales) | `python scripts/backfill_texto.py --slug {slug}` | ✅ |
+| `fix_facebook_reach.py` | Rellena reach 500 pubs Facebook con `update_metrics()` v25.0 | `python scripts/fix_facebook_reach.py --slug {slug}` | ✅ |
+| `fix_fechas_publicacion.py` | Corrige timestamps Meta (Python 3.10 compat) | `python scripts/fix_fechas_publicacion.py --slug {slug}` | ✅ |
+| `fix_web_fechas.py` | Corrige `datePublished` artículos web desde HTML | `python scripts/fix_web_fechas.py --slug {slug}` | ✅ |
+| `fix_story_images.py` | MP4 → thumbnail para Stories vídeo | `python scripts/fix_story_images.py --slug {slug}` | ✅ |
+| `fix_shorts_metrics.py` | Rellena métricas Shorts sin reach | `python scripts/fix_shorts_metrics.py --slug {slug}` | ✅ |
+| `fix_2026.py` | Diagnostica/corrige pubs 2026 no detectadas por checkpoint | `python scripts/fix_2026.py --slug {slug}` | ✅ |
 | `migrate_add_sin_datos.py` | ALTER TABLE MySQL: añade `sin_datos` al ENUM | `python scripts/migrate_add_sin_datos.py` *(1 vez)* | ✅ |
-| `migrate_add_youtube_short.py` | Migración DB: añade canal `youtube_short` | `python scripts/migrate_add_youtube_short.py` *(1 vez)* | 🆕 |
-| `migrate_add_texto.py` | Migración DB: añade campo `texto` a publicaciones | `python scripts/migrate_add_texto.py` *(1 vez)* | 🆕 |
-| `sync_paid_metrics.py` | Sync métricas pagadas desde Meta Ads y/o Google Ads | `python scripts/sync_paid_metrics.py --slug roadrunningreview --canal [meta\|google\|all] --fecha-desde YYYY-MM-DD` | 🆕 |
-| `authorize_google_ads.py` | OAuth flow Google Ads → `access_token`+`refresh_token` en DB; HTTPServer en :8001 | `python scripts/authorize_google_ads.py --slug roadrunningreview` | 🆕 |
-| `validate_all.py` | Suite validación completa: tokens, DB, API, métricas | `python scripts/validate_all.py --slug roadrunningreview` | ✅ |
-| `validate_semanal.py` | Valida histórico semanal | `python scripts/validate_semanal.py --slug roadrunningreview` | 🆕 |
-| `check_instagram_errors.py` | Revisar errores Instagram en DB | `python scripts/check_instagram_errors.py --slug roadrunningreview` | 🆕 |
-| `test_facebook_reach.py` | Diagnóstico verbose reach Facebook + `/me/permissions` | `python scripts/test_facebook_reach.py --slug roadrunningreview [--post-id ID]` | ✅ |
-| `test_fb_metrics_v25.py` | Prueba sistemática métricas/endpoints v25.0 | `python scripts/test_fb_metrics_v25.py --slug roadrunningreview` | ✅ |
-| `test_ga4_semanal.py` | Verifica GA4 por semana ISO para web | `python scripts/test_ga4_semanal.py --slug roadrunningreview` | ✅ |
-| `diagnose_web_agent.py` | Diagnóstico web agent: sitemap, GA4, checkpoints, DB | `python scripts/diagnose_web_agent.py --slug roadrunningreview` | ✅ |
-| `reset_checkpoint.py` | Resetea checkpoint web agent a fecha concreta | `python scripts/reset_checkpoint.py --slug roadrunningreview --fecha 2026-01-01` | ⚠ usar con cuidado |
+| `migrate_add_youtube_short.py` | Migración DB: añade canal `youtube_short` | `python scripts/migrate_add_youtube_short.py` *(1 vez)* | ✅ |
+| `migrate_add_texto.py` | Migración DB: añade campo `texto` a publicaciones | `python scripts/migrate_add_texto.py` *(1 vez)* | ✅ |
+| `sync_paid_metrics.py` | Sync métricas pagadas desde Meta Ads y/o Google Ads | `python scripts/sync_paid_metrics.py --slug {slug} --canal [meta\|google\|all] --fecha-desde YYYY-MM-DD` | ✅ |
+| `authorize_google_ads.py` | OAuth flow Google Ads → `access_token`+`refresh_token` en DB; HTTPServer en :8001 | `python scripts/authorize_google_ads.py --slug {slug}` | ✅ |
+| `validate_all.py` | Suite validación completa: tokens, DB, API, métricas | `python scripts/validate_all.py --slug {slug}` | ✅ |
+| `validate_semanal.py` | Valida histórico semanal | `python scripts/validate_semanal.py --slug {slug}` | ✅ |
+| `reset_checkpoint.py` | Resetea checkpoint web agent a fecha concreta | `python scripts/reset_checkpoint.py --slug {slug} --fecha 2026-01-01` | ⚠ usar con cuidado |
 
 ---
 
@@ -241,7 +274,10 @@ campaña y notificaciones automáticas a cada marca cliente.
 | **Google Ads GAQL date range** | `LAST_365_DAYS` y `THIS_YEAR` inválidos en GAQL v20 → rango explícito `'{year}-01-01' AND '{year}-12-31'` calculado dinámicamente |
 | **Google Ads GAQL WHERE** | `metrics.impressions > 0` inválido en WHERE de GAQL → filtrado en Python post-query |
 | **authorize_google_ads.py URI** | Redirect URI OOB (`urn:ietf:wg:oauth:2.0:oob`) deprecada → `HTTPServer` local en `:8001` |
-| **authorize_google_ads.py token** | `get_tok()` llamada sin argumento `jwt_secret` → corregido |
+| **Threads OAuth redirect URI** | Threads rechaza callbacks HTTP → cambiado a `https://www.roadrunningreview.com/auth/threads/callback`; endpoint `/auth/threads/callback` añadido a `main.py`; script muestra código en browser y pide pegarlo en terminal |
+| **Threads primer run sin checkpoint** | Sin checkpoint el agente pagina todos los posts históricos (~1000+) → insertar `LogEjecucion` fake con fecha 30 días atrás antes del primer run |
+| **TRR sitemap incorrecto** | `SiteMapTrailES0.xml` solo tiene páginas de marcas sin `<lastmod>` → sitemap correcto es `SiteMapTrailES1.xml` |
+| **authorize_*.py --slug** | Scripts `authorize_youtube.py`, `authorize_threads.py`, `authorize_facebook.py` ahora aceptan `--slug` como parámetro obligatorio (antes hardcodeado para roadrunningreview) |
 | `_parse_ts()` | Timestamps Meta sin dos puntos en el offset de zona horaria (Python 3.10 compat) |
 | Stories inserción | `detect_and_update()` inserta Stories nuevas además de actualizar las existentes |
 | Stories vídeo | Usa `thumbnail_url` en lugar de `media_url` para Stories de tipo VIDEO |
@@ -257,55 +293,53 @@ campaña y notificaciones automáticas a cada marca cliente.
 
 ---
 
-## Triggers automáticos (APScheduler) — 11 jobs activos
+## Triggers automáticos (APScheduler) — 26 jobs activos (13 por medio)
 
 | Job | Trigger | Descripción |
 |-----|---------|-------------|
-| Detección diaria (todos los canales) | Cron **07:00 UTC** diario | `_job_daily()` — detección pubs nuevas + update métricas |
-| Stories captura | Cron **:00 cada hora** | `_job_stories()` — captura Stories Instagram <24h |
-| Stories captura final | Cron **:50-:59 cada hora** | Reintento final antes de expirar las Stories |
-| GA4 histórico | Cron **lunes 00:00 UTC** | Snapshot semanal ISO GA4 web |
-| YouTube Analytics | Cron **lunes 00:30 UTC** | Snapshot semanal YouTube |
-| YouTube Shorts Analytics | Cron **lunes 00:45 UTC** | Snapshot semanal YouTube Shorts |
-| Instagram snapshot semanal | Cron **lunes 01:00 UTC** | Snapshot semanal Instagram posts/reels/stories |
-| Facebook snapshot semanal | Cron **lunes 01:30 UTC** | Snapshot semanal Facebook |
-| Threads snapshot semanal | Cron **lunes 02:00 UTC** | Snapshot semanal Threads |
-| **Sync métricas pagadas** | Cron **martes 03:00 UTC** | `google_ads_agent.sync_paid_metrics` + `meta_ads_agent.sync_paid_metrics` |
-| YouTube Shorts actualización métricas | Cada **48 horas** | `update_metrics()` para Shorts recientes |
+| `{slug}_hourly` | Cron **:10 cada hora** | Detección nuevas pubs + actualiza métricas pendientes (todos los canales) |
+| `{slug}_daily` | Cron **07:00 UTC** diario | Resumen diario + notificaciones email |
+| `{slug}_stories_hourly` | Cron **:00 cada hora** | Captura Stories Instagram <24h |
+| `{slug}_stories_final` | Cron **:50-:59 cada hora** | Captura final Stories antes de expirar |
+| `{slug}_youtube_shorts_update` | **Cada 48h** | Actualiza métricas YouTube Shorts recientes |
+| `{slug}_weekly_web_ga4` | Cron **lunes 00:00 UTC** | Snapshot semanal ISO GA4 web |
+| `{slug}_weekly_youtube` | Cron **lunes 00:30 UTC** | Snapshot semanal YouTube Analytics |
+| `{slug}_weekly_youtube_shorts` | Cron **lunes 00:45 UTC** | Snapshot semanal YouTube Shorts Analytics |
+| `{slug}_weekly_instagram` | Cron **lunes 01:00 UTC** | Snapshot semanal Instagram posts/reels/stories |
+| `{slug}_weekly_facebook` | Cron **lunes 01:30 UTC** | Snapshot semanal Facebook |
+| `{slug}_weekly_threads` | Cron **lunes 02:00 UTC** | Snapshot semanal Threads |
+| `{slug}_weekly_tiktok` | Cron **lunes 02:30 UTC** | Snapshot semanal TikTok |
+| `{slug}_weekly_paid_metrics` | Cron **martes 03:00 UTC** | Sync métricas pagadas (Google Ads + Meta Ads) |
 
-Horarios diarios configurables en `config_medio.hora_trigger_diario` y `hora_trigger_stories`.
+---
+
+## Guía para añadir un nuevo medio
+
+1. **Crear medio en panel web** (o DB directamente): `slug`, `nombre`, `url_web`, `rss_url` (sitemap correcto con `<lastmod>`)
+2. **GA4**: añadir `roadrunning-ga4@...` como Lector en la propiedad GA4; configurar `ga4_property_id` en `config_medio`
+3. **YouTube**: `python scripts/authorize_youtube.py --slug {nuevo_slug}`
+   - Copiar `client_id`/`client_secret` de otro medio si se usa la misma Google Cloud app
+4. **Instagram/Facebook**: añadir cuenta al Business Portfolio Horizonte Norte SL → asignar usuario `socialintelligencebot` → regenerar System User Token → obtener `instagram_account_id` y `page_id` via Graph API Explorer (`/me/accounts`, `?fields=instagram_business_account`)
+5. **Threads**: añadir cuenta como evaluador en Meta Developers → Threads API → aceptar invitación desde **app móvil de Threads** (no email) → `python scripts/authorize_threads.py --slug {nuevo_slug}`; insertar `LogEjecucion` fake 30 días atrás para evitar paginar histórico completo en primer run
+6. **Importar marcas**: CSV con columnas `v_idmarca;v_descmarca;v_emails` → script de importación `/tmp/import_{slug}.py`
+7. **Reiniciar servicio** para que el scheduler registre los jobs del nuevo medio: `systemctl restart social-intelligence`
+8. **Probar cada agente**: `run_agent(db, medio, canal, 'manual')` para `web`, `instagram`, `facebook`, `youtube`, `threads`; `run_stories(db, medio)` para stories
 
 ---
 
 ## Base de datos — volumen actual
 
-*Datos a 2026-04-09*
+*Datos a 2026-04-15*
 
 | Tabla | Filas | Descripción |
 |-------|------:|-------------|
-| `publicaciones` | ~1.537 | Publicaciones detectadas con métricas actuales |
+| `publicaciones` | ~4.326 | Publicaciones detectadas con métricas actuales (2 medios) |
 | `historial_metricas` | ~2.448+ | Snapshots semanales ISO por publicación (reach/likes/shares/diff) |
-| `marcas` | 187 | Catálogo de marcas con aliases |
-| `log_ejecuciones` | 22+ | Log de cada ejecución de agente (agente, tipo, estado, conteos) |
-| `tokens_canal` | 12+ | Tokens API cifrados por medio+canal+clave |
+| `marcas` | 445 | Catálogo de marcas (187 RRR + 258 TRR) |
+| `log_ejecuciones` | 30+ | Log de cada ejecución de agente (agente, tipo, estado, conteos) |
+| `tokens_canal` | 30+ | Tokens API cifrados por medio+canal+clave |
+| `medios` | 2 | roadrunningreview + trailrunningreview |
 | `agencias` | 0 | Catálogo de agencias *(vacío — pendiente importar)* |
-| `config_medio` | 0 | Config por medio *(pendiente — usa valores por defecto)* |
-| `medios` | 1 | Medios registrados |
-
-**Desglose publicaciones por canal:**
-
-| Canal | Pubs |
-|-------|-----:|
-| Web | ~293 |
-| YouTube | ~49 |
-| YouTube Shorts | ~30 |
-| Instagram posts/Reels | 503 |
-| Instagram Stories | ~10 |
-| Facebook | 503 |
-| Threads | ~138 |
-| **TOTAL** | **~1.537** |
-
-**Reach total acumulado: ~30.1M**
 
 ---
 
@@ -322,7 +356,8 @@ Horarios diarios configurables en `config_medio.hora_trigger_diario` y `hora_tri
 | v0.5 | Histórico semanal métricas + backfill GA4 |
 | v0.6 | Fix Brand ID Agent substring→prefix · fix timezone naive/aware · Facebook v21→v25 + `_resolve_page_token` · `estado_marca` · `sin_datos` enum · `authorize_facebook.py` · `validate_all.py` |
 | v0.7 | YouTube Shorts Agent · Threads Agent · 10 jobs APScheduler · Apache mod_proxy producción · fix Stories inserción/vídeo/retry · fix timestamps Meta · campo `texto` en DB · fix web fechas datePublished · fix Shorts duplicados |
-| **v0.8** *(actual)* | Meta Ads Agent + Google Ads Agent · columnas `reach_pagado`/`inversion_pagada` en DB · badge Patrocinado panel · barras apiladas orgánico+pagado en Analytics · `sync_paid_metrics.py --fecha-desde` · `authorize_google_ads.py` · 11 jobs APScheduler · fix GAQL VIDEO_RESPONSIVE_AD + rango fechas + WHERE metrics |
+| v0.8 | Meta Ads Agent + Google Ads Agent · columnas `reach_pagado`/`inversion_pagada` en DB · badge Patrocinado panel · barras apiladas orgánico+pagado en Analytics · `sync_paid_metrics.py --fecha-desde` · `authorize_google_ads.py` · 11 jobs APScheduler · fix GAQL VIDEO_RESPONSIVE_AD + rango fechas + WHERE metrics |
+| **v0.9** *(actual)* | Segundo medio TRAILRUNNINGReview: 2.789 pubs/55.4M reach · 258 marcas importadas · todos los canales activos (Instagram/Facebook/YouTube/Threads/Web/Stories) · 26 jobs scheduler (13 × 2 medios) · fix Threads OAuth HTTPS redirect URI · fix sitemap TRR (`SiteMapTrailES1.xml`) · `authorize_*.py` acepta `--slug` · endpoint `/auth/threads/callback` en main.py |
 
 ### Pendientes
 
@@ -335,8 +370,7 @@ Horarios diarios configurables en `config_medio.hora_trigger_diario` y `hora_tri
 **Prioridad Media**
 - Notificación diaria email a cada marca/agencia via SMTP
 - TikTok Agent — pendiente aprobación Research API
-
-**Fase 5 — Avanzado**
+- Tercer medio: TREKKINGReview (aparece en Business Portfolio Horizonte Norte SL)
 
 **Fase 5 — Avanzado**
 - YouTube Scraper canales ajenos (reach vídeos de marcas externas)
@@ -368,11 +402,6 @@ systemctl restart social-intelligence
 cd /home/pirineos/social-intelligence
 git pull origin main
 
-# Reconstruir frontend
-cd /home/pirineos/social-intelligence/frontend
-npm run build
-cd ..
-
 # Actualizar + rebuild + reiniciar (secuencia completa)
 cd /home/pirineos/social-intelligence && git pull origin main && \
   cd frontend && npm run build && cd .. && \
@@ -381,53 +410,6 @@ cd /home/pirineos/social-intelligence && git pull origin main && \
 # Ver logs de aplicación
 journalctl -u social-intelligence --since "1 hour ago"
 journalctl -u social-intelligence -n 100
-```
-
-### Despliegue inicial en CentOS (referencia)
-
-```bash
-# 1. Clonar
-git clone https://github.com/marcsub/social-intelligence /home/pirineos/social-intelligence
-cd /home/pirineos/social-intelligence
-
-# 2. Entorno Python
-python3.13 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-
-# 3. MySQL
-mysql -u root -p -e "CREATE DATABASE social_intelligence CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-# Crear usuario pirineos, configurar DB_URL en .env
-
-# 4. Variables entorno
-cp .env.example .env  # editar: DB_URL, JWT_SECRET, SMTP_*
-
-# 5. Frontend
-cd frontend && npm install && npm run build && cd ..
-
-# 6. Migraciones DB (ejecutar una vez)
-python scripts/migrate_add_sin_datos.py
-python scripts/migrate_add_youtube_short.py
-python scripts/migrate_add_texto.py
-
-# 7. Tokens y datos base
-python scripts/import_marcas.py
-python scripts/authorize_meta.py roadrunningreview
-python scripts/authorize_facebook.py --slug roadrunningreview
-python scripts/authorize_youtube.py
-
-# 8. systemd
-# /etc/systemd/system/social-intelligence.service
-# ExecStart=/home/pirineos/social-intelligence/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
-systemctl enable --now social-intelligence
-
-# 9. Apache — ver sección "Configuración Apache" arriba
-
-# 10. Backfill inicial producción
-python scripts/fix_2026.py --slug roadrunningreview
-python scripts/backfill_historico.py --slug roadrunningreview
-python scripts/backfill_shorts_historico.py --slug roadrunningreview
-python scripts/backfill_texto.py --slug roadrunningreview
-python scripts/fix_facebook_reach.py --slug roadrunningreview
 ```
 
 ---
@@ -439,7 +421,7 @@ python scripts/fix_facebook_reach.py --slug roadrunningreview
 | Problema | Descripción | Acción |
 |----------|-------------|--------|
 | Facebook page token | Caduca en ~60 días — pendiente renovación automática | Implementar alerta + renovación |
-| Stories 8 abril sin reach | Stories del 2026-04-08 sin datos de reach | Introducir manualmente |
+| TRR Threads token | Long-lived token expira en 60 días — renovar con `authorize_threads.py --slug trailrunningreview` | Recordatorio mensual |
 
 ### 🟡 EN SEGUIMIENTO
 
@@ -447,7 +429,7 @@ python scripts/fix_facebook_reach.py --slug roadrunningreview
 |------|-------------|
 | Instagram errores 400 | Posts antiguos >2 años devuelven 400 — normal, Meta no expone insights históricos | Esperado |
 | YouTube reach | YouTube Analytics no expone impresiones por vídeo via API — `views` como proxy | Limitación API |
-| Brand ID sin marca | ~97 publicaciones sin marca asignada — revisar aliases Bikkoa, U-Tech y otros | Manual |
+| Brand ID sin marca | ~97 pubs RRR sin marca asignada — revisar aliases Bikkoa, U-Tech y otros | Manual |
 
 ### 🔵 LIMITACIONES CONOCIDAS DE APIs
 
@@ -460,6 +442,7 @@ python scripts/fix_facebook_reach.py --slug roadrunningreview
 | Instagram Reels | API devuelve `media_type=VIDEO` para vídeos y reels — se detectan por permalink `/reel/` |
 | Instagram | Posts >2 años devuelven error 400 en insights — comportamiento esperado de Meta |
 | Meta RRSS | Histórico semanal solo desde semana actual hacia adelante — no hay backfill de semanas pasadas |
+| Threads | Primer run sin checkpoint pagina histórico completo (~1000+ posts) — insertar LogEjecucion fake 30 días antes |
 | TikTok | Research API pendiente aprobación |
 
 ### ⚪ DEUDA TÉCNICA
@@ -482,5 +465,6 @@ python scripts/fix_facebook_reach.py --slug roadrunningreview
 | 3 | Renovación automática page token Facebook | 🔴 Alta | ⬜ siguiente |
 | 4 | Meta Ads: reactivar cuenta + permiso `ads_read` | 🔴 Alta | ⬜ pendiente externo |
 | 5 | Notificación diaria email a cada marca | 🟡 Media | ⬜ siguiente |
-| 6 | TikTok Agent — pendiente aprobación API | 🔵 Baja | ⬜ bloqueado |
-| 7 | Brand Vision Agent — identificación marca por imagen con Claude API | 🔵 Baja | ⬜ siguiente |
+| 6 | Tercer medio TREKKINGReview | 🟡 Media | ⬜ siguiente |
+| 7 | TikTok Agent — pendiente aprobación API | 🔵 Baja | ⬜ bloqueado |
+| 8 | Brand Vision Agent — identificación marca por imagen con Claude API | 🔵 Baja | ⬜ siguiente |
