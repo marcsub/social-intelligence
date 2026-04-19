@@ -14,7 +14,7 @@ from models.database import (
     Medio, Publicacion, LogEjecucion,
     CanalEnum, EstadoMetricasEnum
 )
-from agents import web_agent, youtube_agent, youtube_shorts_agent, instagram_agent, facebook_agent, threads_agent, tiktok_agent
+from agents import web_agent, youtube_agent, youtube_shorts_agent, instagram_agent, facebook_agent, threads_agent, tiktok_agent, x_agent
 from agents import instagram_stories_agent
 from agents import meta_ads_agent, google_ads_agent
 from core.notifier import notify_daily
@@ -94,6 +94,7 @@ AGENTS = {
     "facebook":       facebook_agent,
     "threads":        threads_agent,
     "tiktok":         tiktok_agent,
+    "x":              x_agent,
 }
 
 # Canal asociado a cada agente (para query de métricas pendientes en run_agent).
@@ -105,6 +106,7 @@ AGENT_CANAL: dict[str, CanalEnum] = {
     "facebook":  CanalEnum.facebook,
     "threads":   CanalEnum.threads,
     "tiktok":    CanalEnum.tiktok,
+    "x":         CanalEnum.x,
 }
 
 
@@ -396,6 +398,7 @@ def _register_medio_jobs(scheduler, SessionLocal, medio: Medio):
         ("facebook",       1,  30, "Facebook snapshot",        _job_weekly_facebook),
         ("threads",        2,  0,  "Threads snapshot",         _job_weekly_threads),
         ("tiktok",         2,  30, "TikTok snapshot",          _job_weekly_tiktok),
+        ("x",              2,  45, "X snapshot",               _job_weekly_x),
     ]
     for job_name, hour, minute, desc, func in _WEEKLY_FUNCS:
         _add_job(
@@ -660,6 +663,15 @@ def _job_weekly_tiktok(SessionLocal, medio_id: int):
         db.close()
 
 
+def _job_weekly_x(SessionLocal, medio_id: int):
+    db, medio = _safe_session(SessionLocal, medio_id)
+    if not db: return
+    try:
+        _run_weekly_agent(db, medio, "x", x_agent.snapshot_weekly)
+    finally:
+        db.close()
+
+
 def _job_weekly_paid_metrics(SessionLocal, medio_id: int):
     """Job semanal (martes 03:00 UTC) — sincroniza métricas pagadas desde Meta Ads y Google Ads."""
     db, medio = _safe_session(SessionLocal, medio_id)
@@ -728,6 +740,7 @@ def run_semanal(db: Session, medio: Medio) -> dict:
         ("facebook",       lambda d, m: facebook_agent.snapshot_weekly(d, m)),
         ("threads",        lambda d, m: threads_agent.snapshot_weekly(d, m)),
         ("tiktok",         lambda d, m: tiktok_agent.snapshot_weekly(d, m)),
+        ("x",              lambda d, m: x_agent.snapshot_weekly(d, m)),
         ("paid_meta",      lambda d, m: meta_ads_agent.sync_paid_metrics(d, m)),
         ("paid_google",    lambda d, m: google_ads_agent.sync_paid_metrics(d, m) if google_ads_agent.check_access(d, m.id)[0] else 0),
     ]
