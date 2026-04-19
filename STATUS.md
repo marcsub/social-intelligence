@@ -1,6 +1,6 @@
 # Social Intelligence System — STATUS
 
-> Última actualización: 2026-04-15 — v0.9
+> Última actualización: 2026-04-19 — v0.9
 
 ---
 
@@ -150,16 +150,20 @@ informes de campaña y notificaciones automáticas a cada marca cliente.
 
 *Datos a 2026-04-15*
 
-| Canal | Pubs | Reach total |
-|-------|-----:|------------:|
-| web | 192 | — |
-| instagram_post | 2.000 | 50.8M |
-| facebook | 500 | 4.1M |
-| youtube | 90 | 417K |
-| youtube_short | 3 | 6.9K |
-| threads | 4 | 3.6K |
-| instagram_story | 0 | — (captura automática activa) |
-| **TOTAL** | **2.789** | **55.4M** |
+| Canal | Pubs | Reach total | Estado |
+|-------|-----:|------------:|--------|
+| web | 192 | — | ✅ configurado |
+| instagram_post | 2.000 | 50.8M | ✅ configurado |
+| facebook | 500 | 4.1M | ✅ configurado |
+| youtube | 90 | 417K | ✅ 45 vídeos detectados, OAuth funcionando |
+| youtube_short | 3 | 6.9K | ✅ configurado |
+| threads | 4 | 3.6K | ✅ configurado |
+| instagram_story | 0 | — | ✅ captura automática activa |
+| tiktok | — | — | ⚠ tokens configurados, rate limit temporal — pendiente backfill 2026-01-01 |
+| x | — | — | ⚠ agente listo, pendiente plan de pago ($100/mes) |
+| **TOTAL** | **~2.789** | **~55.4M** | |
+
+**Marcas importadas:** 258 marcas con emails de contacto
 
 ---
 
@@ -173,7 +177,27 @@ informes de campaña y notificaciones automáticas a cada marca cliente.
 | TRAILRUNNINGReview | 2.789 | 55.4M |
 | **TOTAL SISTEMA** | **~4.326** | **~85.5M** |
 
-**Jobs activos:** 26 (13 por medio)
+**Jobs activos:** 28 (14 por medio)
+
+---
+
+## APIs de Ads — estado promoción pagada
+
+### Canales — estado por agente
+
+| Canal | Agente | roadrunningreview | trailrunningreview |
+|-------|--------|:-----------------:|:-----------------:|
+| Web (GA4) | `web_agent.py` | ✅ | ✅ |
+| YouTube | `youtube_agent.py` | ✅ | ✅ |
+| YouTube Shorts | `youtube_shorts_agent.py` | ✅ | ✅ |
+| Instagram posts/reels | `instagram_agent.py` | ✅ | ✅ |
+| Instagram Stories | `instagram_stories_agent.py` | ✅ | ✅ |
+| Facebook | `facebook_agent.py` | ✅ | ✅ |
+| Threads | `threads_agent.py` | ✅ | ✅ |
+| TikTok | `tiktok_agent.py` | ✅ | ⚠ rate limit temporal |
+| **X (Twitter)** | `x_agent.py` | ⚠ pendiente billing | ⚠ pendiente billing |
+
+> **X (Twitter):** Agente implementado (`agents/x_agent.py`) y tokens configurados en DB para ambos medios. Bloqueado por plan de pago — X API Basic = $100/mes. Reactivar cuando se decida contratar el plan.
 
 ---
 
@@ -219,6 +243,7 @@ informes de campaña y notificaciones automáticas a cada marca cliente.
 | `agents/threads_agent.py` | Threads API; App ID 1389357836567753; paginación hasta checkpoint | ✅ |
 | `agents/meta_ads_agent.py` | Meta Marketing API v25; fallo silencioso si falta permiso `ads_read` | ✅ |
 | `agents/google_ads_agent.py` | Google Ads API v20; GAQL dual (FROM asset + FROM ad_group_ad); VIDEO_RESPONSIVE_AD; rango fechas explícito; refresh automático access_token | ✅ |
+| `agents/x_agent.py` | Twitter API v2 Bearer Token; detect_new + update_metrics batch 100 IDs + snapshot_weekly; backoff exponencial en 429; user_id cacheado en DB | ✅ |
 | `utils/semanas.py` | Helpers ISO week: `get_semana_iso`, `get_rango_semana`, `semanas_entre` | ✅ |
 
 ### Frontend — `frontend/src/App.jsx`
@@ -263,6 +288,8 @@ informes de campaña y notificaciones automáticas a cada marca cliente.
 | `validate_all.py` | Suite validación completa: tokens, DB, API, métricas | `python scripts/validate_all.py --slug {slug}` | ✅ |
 | `validate_semanal.py` | Valida histórico semanal | `python scripts/validate_semanal.py --slug {slug}` | ✅ |
 | `reset_checkpoint.py` | Resetea checkpoint web agent a fecha concreta | `python scripts/reset_checkpoint.py --slug {slug} --fecha 2026-01-01` | ⚠ usar con cuidado |
+| `authorize_tiktok.py` | OAuth TikTok Open Platform con soporte `--slug` | `python scripts/authorize_tiktok.py --slug {slug}` | ✅ |
+| `backfill_historico.py` | Snapshots semanales históricos; soporta `--canal x` y `--canal tiktok` | `python scripts/backfill_historico.py --slug {slug} --canal x --anio 2026` | ✅ |
 
 ---
 
@@ -309,6 +336,7 @@ informes de campaña y notificaciones automáticas a cada marca cliente.
 | `{slug}_weekly_facebook` | Cron **lunes 01:30 UTC** | Snapshot semanal Facebook |
 | `{slug}_weekly_threads` | Cron **lunes 02:00 UTC** | Snapshot semanal Threads |
 | `{slug}_weekly_tiktok` | Cron **lunes 02:30 UTC** | Snapshot semanal TikTok |
+| `{slug}_weekly_x` | Cron **lunes 02:45 UTC** | Snapshot semanal X (Twitter) |
 | `{slug}_weekly_paid_metrics` | Cron **martes 03:00 UTC** | Sync métricas pagadas (Google Ads + Meta Ads) |
 
 ---
@@ -357,19 +385,19 @@ informes de campaña y notificaciones automáticas a cada marca cliente.
 | v0.6 | Fix Brand ID Agent substring→prefix · fix timezone naive/aware · Facebook v21→v25 + `_resolve_page_token` · `estado_marca` · `sin_datos` enum · `authorize_facebook.py` · `validate_all.py` |
 | v0.7 | YouTube Shorts Agent · Threads Agent · 10 jobs APScheduler · Apache mod_proxy producción · fix Stories inserción/vídeo/retry · fix timestamps Meta · campo `texto` en DB · fix web fechas datePublished · fix Shorts duplicados |
 | v0.8 | Meta Ads Agent + Google Ads Agent · columnas `reach_pagado`/`inversion_pagada` en DB · badge Patrocinado panel · barras apiladas orgánico+pagado en Analytics · `sync_paid_metrics.py --fecha-desde` · `authorize_google_ads.py` · 11 jobs APScheduler · fix GAQL VIDEO_RESPONSIVE_AD + rango fechas + WHERE metrics |
-| **v0.9** *(actual)* | Segundo medio TRAILRUNNINGReview: 2.789 pubs/55.4M reach · 258 marcas importadas · todos los canales activos (Instagram/Facebook/YouTube/Threads/Web/Stories) · 26 jobs scheduler (13 × 2 medios) · fix Threads OAuth HTTPS redirect URI · fix sitemap TRR (`SiteMapTrailES1.xml`) · `authorize_*.py` acepta `--slug` · endpoint `/auth/threads/callback` en main.py |
+| **v0.9** *(actual)* | Segundo medio TRAILRUNNINGReview: 2.789 pubs/55.4M reach · 258 marcas importadas · todos los canales activos (Instagram/Facebook/YouTube/Threads/TikTok/Web/Stories) · TikTok Agent: OAuth 2.0 access_token + refresh automático · X (Twitter) Agent: `x_agent.py` Bear Token v2 + `snapshot_weekly` · tokens X configurados en DB ambos medios · 28 jobs scheduler (14 × 2 medios, +X weekly lunes 02:45) · fix Threads OAuth HTTPS redirect URI · fix sitemap TRR (`SiteMapTrailES1.xml`) · `authorize_*.py` acepta `--slug` · endpoint `/auth/threads/callback` en main.py |
 
 ### Pendientes
 
 **Prioridad Alta**
 - Generador PDF por marca/año (`reportlab` o `weasyprint`) — portada, tabla pubs, totales canal, capturas
-- X (Twitter) Agent — X API v2 Bearer Token: `impressions`, `likes`, `retweets`, `replies`
 - Renovación automática page token Facebook (~60 días) + alerta 7 días antes
 - Meta Ads: reactivar cuenta publicitaria + añadir permiso `ads_read` en token sistema
+- TikTok trailrunningreview: ejecutar backfill desde 2026-01-01 cuando expire rate limit
 
 **Prioridad Media**
 - Notificación diaria email a cada marca/agencia via SMTP
-- TikTok Agent — pendiente aprobación Research API
+- X (Twitter): activar plan Basic ($100/mes) cuando se decida — agente ya implementado
 - Tercer medio: TREKKINGReview (aparece en Business Portfolio Horizonte Norte SL)
 
 **Fase 5 — Avanzado**
@@ -443,7 +471,8 @@ journalctl -u social-intelligence -n 100
 | Instagram | Posts >2 años devuelven error 400 en insights — comportamiento esperado de Meta |
 | Meta RRSS | Histórico semanal solo desde semana actual hacia adelante — no hay backfill de semanas pasadas |
 | Threads | Primer run sin checkpoint pagina histórico completo (~1000+ posts) — insertar LogEjecucion fake 30 días antes |
-| TikTok | Research API pendiente aprobación |
+| TikTok | Free tier: rate limit 429 esporádico — esperar y reintentar; TRR pendiente backfill |
+| X (Twitter) | API Basic ($100/mes) requerida para `impression_count`; Free tier puede devolver 402 CreditsDepleted |
 
 ### ⚪ DEUDA TÉCNICA
 
@@ -461,10 +490,10 @@ journalctl -u social-intelligence -n 100
 | # | Tarea | Prioridad | Estado |
 |---|-------|-----------|--------|
 | 1 | Generador PDF informes por marca/año | 🔴 Alta | ⬜ siguiente |
-| 2 | X (Twitter) Agent — Bearer Token disponible | 🔴 Alta | ⬜ siguiente |
-| 3 | Renovación automática page token Facebook | 🔴 Alta | ⬜ siguiente |
-| 4 | Meta Ads: reactivar cuenta + permiso `ads_read` | 🔴 Alta | ⬜ pendiente externo |
+| 2 | Renovación automática page token Facebook | 🔴 Alta | ⬜ siguiente |
+| 3 | Meta Ads: reactivar cuenta + permiso `ads_read` | 🔴 Alta | ⬜ pendiente externo |
+| 4 | TikTok TRR: backfill 2026-01-01 (tras expirar rate limit) | 🔴 Alta | ⬜ siguiente |
 | 5 | Notificación diaria email a cada marca | 🟡 Media | ⬜ siguiente |
-| 6 | Tercer medio TREKKINGReview | 🟡 Media | ⬜ siguiente |
-| 7 | TikTok Agent — pendiente aprobación API | 🔵 Baja | ⬜ bloqueado |
+| 6 | X (Twitter): activar plan Basic ($100/mes) | 🟡 Media | ⬜ bloqueado billing |
+| 7 | Tercer medio TREKKINGReview | 🟡 Media | ⬜ siguiente |
 | 8 | Brand Vision Agent — identificación marca por imagen con Claude API | 🔵 Baja | ⬜ siguiente |
