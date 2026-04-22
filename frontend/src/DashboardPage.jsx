@@ -439,16 +439,37 @@ function GlobalFilters({ filtros, onChange, marcas }) {
       </div>
 
       {/* Periodo */}
-      <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
-        {PERIODOS.map(p => (
-          <button key={p.value} onClick={() => onChange({ ...filtros, periodo: p.value })}
-            style={{
-              padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 500, cursor: "pointer",
-              border: `1px solid ${filtros.periodo === p.value ? T.accent : T.border}`,
-              background: filtros.periodo === p.value ? T.accent : "transparent",
-              color: filtros.periodo === p.value ? "#fff" : T.text2,
-            }}>{p.label}</button>
-        ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto", flexWrap: "wrap" }}>
+        {PERIODOS.map(p => {
+          const hasCustom = filtros.fecha_desde || filtros.fecha_hasta;
+          const active = !hasCustom && filtros.periodo === p.value;
+          return (
+            <button key={p.value}
+              onClick={() => onChange({ ...filtros, periodo: p.value, fecha_desde: null, fecha_hasta: null })}
+              style={{
+                padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 500, cursor: "pointer",
+                border: `1px solid ${active ? T.accent : T.border}`,
+                background: active ? T.accent : "transparent",
+                color: active ? "#fff" : T.text2,
+              }}>{p.label}</button>
+          );
+        })}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 8 }}>
+          <input type="date"
+            value={filtros.fecha_desde || ""}
+            onChange={e => onChange({ ...filtros, fecha_desde: e.target.value || null })}
+            style={{ fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 8, padding: "4px 8px", background: T.card, color: T.text1 }} />
+          <span style={{ fontSize: 11, color: T.text2 }}>→</span>
+          <input type="date"
+            value={filtros.fecha_hasta || ""}
+            onChange={e => onChange({ ...filtros, fecha_hasta: e.target.value || null })}
+            style={{ fontSize: 11, border: `1px solid ${T.border}`, borderRadius: 8, padding: "4px 8px", background: T.card, color: T.text1 }} />
+          {(filtros.fecha_desde || filtros.fecha_hasta) && (
+            <button onClick={() => onChange({ ...filtros, fecha_desde: null, fecha_hasta: null })}
+              title="Limpiar fechas"
+              style={{ border: "none", background: "transparent", color: T.text2, cursor: "pointer", fontSize: 14, padding: "0 4px" }}>✕</button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -463,7 +484,13 @@ function MarcasTab({ slug, api, filtros, marcas }) {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    const p = new URLSearchParams({ periodo: filtros.periodo });
+    const p = new URLSearchParams();
+    if (filtros.fecha_desde && filtros.fecha_hasta) {
+      p.set("fecha_desde", filtros.fecha_desde);
+      p.set("fecha_hasta", filtros.fecha_hasta);
+    } else {
+      p.set("periodo", filtros.periodo);
+    }
     if (filtros.marca_id) p.set("marca_id", filtros.marca_id);
     if (filtros.canal)    p.set("canal", filtros.canal);
     api("GET", `/medios/${slug}/analytics/dashboard?${p}`)
@@ -600,7 +627,13 @@ function PatrocinadosTab({ slug, api, filtros }) {
 
   useEffect(() => {
     setLoading(true);
-    const p = new URLSearchParams({ periodo: filtros.periodo });
+    const p = new URLSearchParams();
+    if (filtros.fecha_desde && filtros.fecha_hasta) {
+      p.set("fecha_desde", filtros.fecha_desde);
+      p.set("fecha_hasta", filtros.fecha_hasta);
+    } else {
+      p.set("periodo", filtros.periodo);
+    }
     if (filtros.canal) p.set("canal", filtros.canal);
     api("GET", `/medios/${slug}/analytics/resumen?${p}`)
       .then(d => { setData(d); setLoading(false); })
@@ -684,7 +717,7 @@ function cardStyle(accentColor) {
 export default function DashboardPage({ slug, api, PublicacionesPage }) {
   const [tab, setTab] = useState("clipping");
   const [marcas, setMarcas] = useState([]);
-  const [filtros, setFiltros] = useState({ periodo: "3m", marca_id: null, canal: null });
+  const [filtros, setFiltros] = useState({ periodo: "3m", marca_id: null, canal: null, fecha_desde: null, fecha_hasta: null });
 
   useEffect(() => {
     api("GET", `/medios/${slug}/marcas`).then(setMarcas).catch(() => {});
