@@ -22,9 +22,14 @@ class BrandIdResult:
 
 
 def _normalize(text: str) -> str:
-    """Normaliza texto: minúsculas, sin acentos básicos, sin @/#."""
+    """Normaliza texto: minúsculas, sin tildes ni diéresis, sin @/#."""
+    import unicodedata
     text = text.lower().strip()
-    text = text.replace("á","a").replace("é","e").replace("í","i").replace("ó","o").replace("ú","u")
+    # Quita tildes, diéresis, acentos en general (NFKD + drop combining marks)
+    text = "".join(
+        c for c in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(c)
+    )
     text = re.sub(r"[@#]", "", text)
     return text
 
